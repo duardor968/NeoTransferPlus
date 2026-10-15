@@ -23,6 +23,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildFeatures { compose = true }
@@ -40,6 +41,9 @@ android {
         }
         getByName("release") {
             isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("localRelease")
         }
         create("preview") {
@@ -53,6 +57,39 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.systemProperty("roborazzi.test.record", "true")
+                it.systemProperty("screens", providers.gradleProperty("screens").getOrElse(""))
+                it.maxHeapSize = "3g"
+            }
+        }
+    }
+}
+
+/** Writes res/xml/shortcuts.xml from its template: a static shortcut must name its package, which differs per variant. */
+abstract class ShortcutsResource : DefaultTask() {
+    @get:InputFile abstract val template: RegularFileProperty
+    @get:Input abstract val applicationId: Property<String>
+    @get:OutputDirectory abstract val resources: DirectoryProperty
+
+    @TaskAction fun write() {
+        val xml = resources.file("xml/shortcuts.xml").get().asFile
+        xml.parentFile.mkdirs()
+        xml.writeText(template.get().asFile.readText().replace("\${applicationId}", applicationId.get()))
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val shortcuts = tasks.register<ShortcutsResource>("generate${variant.name.replaceFirstChar(Char::uppercase)}Shortcuts") {
+            template.set(layout.projectDirectory.file("src/main/shortcuts.xml"))
+            applicationId.set(variant.applicationId)
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(shortcuts, ShortcutsResource::resources)
+    }
 }
 
 room { schemaDirectory("$projectDir/schemas") }
@@ -71,11 +108,19 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("com.squareup.okhttp3:okhttp:5.4.0")
+    implementation("com.google.zxing:core:3.5.3")
+    "previewImplementation"("androidx.compose.ui:ui-test-manifest")
     testImplementation(kotlin("test-junit"))
     testImplementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:5.4.0")
+    testImplementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
     androidTestImplementation(kotlin("test-junit"))
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

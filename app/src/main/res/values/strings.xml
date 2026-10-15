@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NeoTransfer+</string>
+    <!-- Launcher shortcut and Quick Settings tile. -->
+    <string name="scan">Escanear</string>
+</resources>

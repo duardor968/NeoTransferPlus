@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Frosted N: the approved texture in white so it reads on the blue background. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:inset="26%">
+    <bitmap android:src="@drawable/nt_launcher_mark" android:gravity="fill" android:filter="true" />
+</inset>
