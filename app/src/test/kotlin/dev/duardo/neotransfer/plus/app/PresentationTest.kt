@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.plus.app
 
+import dev.duardo.neotransfer.plus.app.routes.cardFromQr
 import dev.duardo.neotransfer.plus.app.routes.cardNumberError
 import dev.duardo.neotransfer.plus.app.routes.luhn
 import dev.duardo.neotransfer.plus.app.routes.typeAmount
@@ -146,6 +147,15 @@ class PresentationTest {
         val reference = recentReferences(journal).single()
         assertEquals(ServiceKind.Electricity, reference.kind)
         assertEquals(BigDecimal("300"), reference.lastPaid?.amount)
+    }
+
+    @Test fun transfermovilCardCodesAndBareNumbersCarryTheirCard() {
+        assertEquals("9212060123456781", cardFromQr("TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9212060123456781,53124578,"))
+        assertEquals("9212060123456781", cardFromQr("transfermovil_etecsa;transferencia; 9212 0601 2345 6781 ;"))
+        assertEquals("9212060123456781", cardFromQr("9212-0601-2345-6781"))
+        assertNull(cardFromQr("TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9212060123456782,"))
+        assertNull(cardFromQr("07CLE00417PAGO"))
+        assertNull(cardFromQr("{\"id_transaccion\":\"1\"}"))
     }
 
     @Test fun keypadAndCardNumbersRefuseWhatCannotBeSent() {

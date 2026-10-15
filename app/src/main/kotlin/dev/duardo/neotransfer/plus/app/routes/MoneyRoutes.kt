@@ -67,9 +67,18 @@ import dev.duardo.neotransfer.plus.ui.transfer.TransferReviewScreen
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** Only ENZONA's own code families go on to ENZONA; anything else is refused over the camera. */
-private fun classifyEnzona(code: String): QrVerdict =
-    if (EnzonaQrCode.isCandidate(code)) QrVerdict.Accepted else QrVerdict.Rejected("Este QR no es de ENZONA")
+/** ENZONA's own code families go on to ENZONA; a card's transfer code goes to a transfer; anything else is refused. */
+private fun classifyQr(code: String): QrVerdict = when {
+    EnzonaQrCode.isCandidate(code) || cardFromQr(code) != null -> QrVerdict.Accepted
+    else -> QrVerdict.Rejected("Este QR no es de ENZONA ni de una tarjeta")
+}
+
+/** A transfer to [pan], named by its contact when exactly one has it. */
+private fun cardRecipient(pan: String, contacts: List<Contact>): RecipientUi.Card {
+    val contact = contacts.ownerOf(pan)
+    val card = contact?.cards?.first { it.pan == pan }
+    return RecipientUi.Card(ForeignCardUi(card?.id ?: "pan:$pan", pan, Banks.ofPan(pan), card?.label), contact?.name, contact?.id)
+}
 
 private fun EnzonaResolvedQr.accountRecipient(): RecipientUi.Account? {
     val uuid = accountUuid ?: return null
@@ -138,11 +147,7 @@ fun RecipientRoute(plus: PlusApp) {
         chooseCardOf = chooseCardOf?.let { id -> withCards.firstOrNull { it.id == id } ?: all.firstOrNull { it.id == id }?.toUi() },
     )
 
-    fun toCard(pan: String) {
-        val contact = all.ownerOf(pan)
-        val card = contact?.cards?.first { it.pan == pan }
-        plus.nav.push(Dest.Amount(RecipientUi.Card(ForeignCardUi(card?.id ?: "pan:$pan", pan, Banks.ofPan(pan), card?.label), contact?.name, contact?.id)))
-    }
+    fun toCard(pan: String) = plus.nav.push(Dest.Amount(cardRecipient(pan, all)))
 
     val actions = object : RecipientActions {
         override fun back() { plus.nav.back() }
@@ -165,12 +170,15 @@ fun RecipientRoute(plus: PlusApp) {
         BackHandler { scanning = false }
         ScannerView(
             mode = ScanMode.ANY,
-            classifyQr = ::classifyEnzona,
+            classifyQr = ::classifyQr,
             onResult = { result ->
                 when (result) {
                     is ScanResult.CardNumber -> { scanning = false; toCard(result.digits) }
-                    // An account or merchant QR is resolved where it can be paid.
-                    is ScanResult.Qr -> { scanning = false; plus.nav.push(Dest.Pay(result.raw)) }
+                    // A card's code goes straight to the amount; an account or merchant QR is resolved where it can be paid.
+                    is ScanResult.Qr -> {
+                        scanning = false
+                        cardFromQr(result.raw)?.let(::toCard) ?: plus.nav.push(Dest.Pay(result.raw))
+                    }
                     is ScanResult.PhoneNumber -> plus.say("Las transferencias van a una tarjeta o a una cuenta ENZONA")
                 }
             },
@@ -280,6 +288,10 @@ fun PayRoute(plus: PlusApp, code: String?) {
     var source by rememberSaveable { mutableIntStateOf(selected) }
 
     fun resolve(raw: String) {
+        cardFromQr(raw)?.let { pan ->
+            plus.nav.replace(Dest.Amount(cardRecipient(pan, plus.contactList.value.orEmpty())))
+            return
+        }
         if (resolving) return
         resolving = true
         problem = null
@@ -352,7 +364,7 @@ fun PayRoute(plus: PlusApp, code: String?) {
     PayQrScreen(state, actions, cameraContent = {
         ScannerView(
             mode = ScanMode.QR,
-            classifyQr = ::classifyEnzona,
+            classifyQr = ::classifyQr,
             onResult = { result -> if (result is ScanResult.Qr && resolved == null && problem == null) resolve(result.raw) },
             onClose = { plus.nav.back() },
         )
@@ -403,16 +415,13 @@ fun ScanRoute(plus: PlusApp) {
     val contacts by plus.contactList.collectAsState()
     ScannerView(
         mode = ScanMode.ANY,
-        classifyQr = ::classifyEnzona,
+        classifyQr = ::classifyQr,
         onResult = { result ->
             when (result) {
-                is ScanResult.Qr -> plus.nav.replace(Dest.Pay(result.raw))
-                is ScanResult.CardNumber -> {
-                    val pan = result.digits
-                    val contact = contacts.orEmpty().ownerOf(pan)
-                    val card = contact?.cards?.first { it.pan == pan }
-                    plus.nav.replace(Dest.Amount(RecipientUi.Card(ForeignCardUi(card?.id ?: "pan:$pan", pan, Banks.ofPan(pan), card?.label), contact?.name, contact?.id)))
-                }
+                is ScanResult.Qr -> plus.nav.replace(
+                    cardFromQr(result.raw)?.let { Dest.Amount(cardRecipient(it, contacts.orEmpty())) } ?: Dest.Pay(result.raw),
+                )
+                is ScanResult.CardNumber -> plus.nav.replace(Dest.Amount(cardRecipient(result.digits, contacts.orEmpty())))
                 is ScanResult.PhoneNumber -> plus.nav.replace(Dest.ContactEdit(null, Contact("new", "", emptyList(), listOf(result.digits))))
             }
         },

@@ -67,3 +67,22 @@ fun cardNumberError(digits: String): String? = when {
     !luhn(digits) -> "Número no válido: revisa los dígitos"
     else -> null
 }
+
+private val cardDigits = Regex("""(?<![0-9])[0-9](?:[ -]?[0-9]){15}(?![0-9])""")
+
+/**
+ * The card carried by a Transfermóvil transfer code (`TRANSFERMOVIL_ETECSA,TRANSFERENCIA,<card>,…`, separators as
+ * each generator writes them) or by a bare Cuban card number; null for anything else or a number that fails Luhn.
+ */
+fun cardFromQr(text: String): String? {
+    val value = text.trim()
+    val upper = value.uppercase()
+    val source = when {
+        "TRANSFERMOVIL_ETECSA" in upper && "TRANSFERENCIA" in upper -> value.substring(upper.indexOf("TRANSFERENCIA") + "TRANSFERENCIA".length)
+        // Bare numbers only for Cuban cards (92…): ENZONA's own codes can be all digits too.
+        value.all { it.isDigit() || it == ' ' || it == '-' } && value.filter(Char::isDigit).startsWith("92") -> value
+        else -> return null
+    }
+    val digits = cardDigits.find(source)?.value?.filter(Char::isDigit) ?: return null
+    return digits.takeIf(::luhn)
+}
