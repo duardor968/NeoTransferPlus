@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -15,17 +14,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.plus.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
-import dev.duardo.neotransfer.plus.designsystem.component.NeoSwitch
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
-import dev.duardo.neotransfer.plus.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
 import dev.duardo.neotransfer.plus.ui.model.CardUi
@@ -82,17 +78,6 @@ fun SourceCardPicker(cards: List<WalletCardUi>, selected: Int, onSelect: (Int) -
 fun WalletCardUi.balanceLine(): String = when (val b = balance) {
     is BalanceUi.Known -> "${card.bank} · Saldo ${formatMoney(b.money.amount, b.money.currency)}"
     BalanceUi.Unknown -> "${card.bank} · ${card.currency}"
-}
-
-/** On/off choice sitting among fields; the row toggles too. */
-@Composable
-fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    NeoRow(
-        label,
-        modifier = modifier.clip(RoundedCornerShape(NeoRadius.field)),
-        trailing = { NeoSwitch(checked, onChange) },
-        onClick = { onChange(!checked) },
-    )
 }
 
 /** The screen's main action, pinned above the navigation bar. */

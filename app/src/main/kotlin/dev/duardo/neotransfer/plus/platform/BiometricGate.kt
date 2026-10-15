@@ -12,9 +12,6 @@ import javax.crypto.Cipher
 class BiometricGate(private val activity: Activity) {
     private val manager get() = activity.getSystemService(BiometricManager::class.java)
 
-    /** False when the phone has no screen lock at all: then there is nothing to unlock with. */
-    fun canUnlock(): Boolean = manager.canAuthenticate(BIOMETRIC_STRONG or DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS
-
     fun canPay(): Boolean = manager.canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
 
     fun unlock(title: String, onSuccess: () -> Unit, onCancelled: () -> Unit): CancellationSignal {

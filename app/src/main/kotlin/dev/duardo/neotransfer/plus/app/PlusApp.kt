@@ -153,6 +153,7 @@ class PlusApp(context: Context) {
 
     private fun signedIn() {
         mutableLocked.value = false
+        nav.home()
         mutableOlderFrom.value = LocalDate.now(zone).minusDays(8)
         selectedCard.value = 0
         activity.value = ActivityQuery()
