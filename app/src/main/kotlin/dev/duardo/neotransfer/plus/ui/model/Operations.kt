@@ -5,10 +5,10 @@ import java.time.Instant
 
 /**
  * State of a movement. Sending: the single request is out. Unconfirmed: ENZONA did not prove the result in time
- * ("Sin confirmar"); it is checked against the history and never resent. Other: a state ENZONA reports that the
- * app does not interpret; its own words are shown.
+ * ("Sin confirmar"); it is checked against the history and never resent. NotSent: the request never left the phone.
+ * Other: a state ENZONA reports that the app does not interpret; its own words are shown.
  */
-enum class OperationStatus { Sending, Confirmed, Pending, Rejected, Unconfirmed, Other }
+enum class OperationStatus { Sending, Confirmed, Pending, Rejected, Unconfirmed, NotSent, Other }
 
 enum class OperationKind(val incoming: Boolean = false) {
     CardTransfer,

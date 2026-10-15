@@ -35,7 +35,11 @@ enum class EnzonaSessionFailure {
     SIGN_IN_AGAIN,
     /** `invalid_client`/`unauthorized_client`: the public client ID was not accepted for this app. */
     CLIENT_REJECTED,
-    /** Network, timeout or an unexpected reply; the saved session is kept. */
+    /** `access_denied`: ENZONA refused this account's access. */
+    ACCESS_DENIED,
+    /** ENZONA answered with another error (`server_error`, `temporarily_unavailable`, an HTTP error, a reply off contract). */
+    SERVER_ERROR,
+    /** Network or timeout; the saved session is kept. */
     UNAVAILABLE,
     /** Local sign-out could not erase the stored session. */
     LOCAL_CLEAR_FAILED,
@@ -382,6 +386,11 @@ class EnzonaSession internal constructor(
     private fun failureFor(failure: Exception): EnzonaSessionFailure = when ((failure as? EnzonaApiException)?.oauthFailure) {
         EnzonaOAuthFailure.INVALID_GRANT -> EnzonaSessionFailure.SIGN_IN_AGAIN
         EnzonaOAuthFailure.INVALID_CLIENT, EnzonaOAuthFailure.UNAUTHORIZED_CLIENT -> EnzonaSessionFailure.CLIENT_REJECTED
-        else -> EnzonaSessionFailure.UNAVAILABLE
+        EnzonaOAuthFailure.ACCESS_DENIED -> EnzonaSessionFailure.ACCESS_DENIED
+        null -> when (failure) {
+            is EnzonaApiException, is IllegalArgumentException -> EnzonaSessionFailure.SERVER_ERROR
+            else -> EnzonaSessionFailure.UNAVAILABLE
+        }
+        else -> EnzonaSessionFailure.SERVER_ERROR
     }
 }

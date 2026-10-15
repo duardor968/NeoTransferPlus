@@ -102,6 +102,12 @@ class EnzonaRepositoryTest {
         override fun observeCardLinks(owner: String) = links.map { rows -> rows.values.filter { it.ownerSubject == owner } }
         override suspend fun putCardLink(link: EnzonaCardLink) = links.update { it + ((link.ownerSubject to link.cardUuid) to link) }
         override fun observeJournal(owner: String) = journal.map { rows -> rows.values.filter { it.intent.ownerSubject == owner } }
+        override suspend fun clearOwner(owner: String) {
+            cache.update { rows -> rows.filterKeys { it.first != owner } }
+            history.update { rows -> rows.filterKeys { it.first != owner } }
+            links.update { rows -> rows.filterKeys { it.first != owner } }
+            baselines -= owner
+        }
         override suspend fun prepareIntent(intent: EnzonaIntent): EnzonaJournalEntry {
             journal.update { if (intent.id in it) it else it + (intent.id to EnzonaJournalEntry(intent)) }
             return journal.value.getValue(intent.id).also { require(it.intent == intent) }
@@ -184,6 +190,20 @@ class EnzonaRepositoryTest {
             assertNull(h.tokens.value)
         }
         Harness(signedIn = false).use { h -> assertEquals(listOf("cancel"), h.scheduler.events) }
+    }
+
+    @Test fun signOutErasesTheOwnersCacheButKeepsThePaymentJournal() = runBlocking {
+        Harness().use { h ->
+            h.enzona.history = "[${credit("t1")}]"
+            assertNull(h.repository.refresh())
+            assertNull(h.repository.saveCardLink(card, "9205000000000007", null))
+            h.repository.preparePayment(EnzonaCardTransferDraft(card, "9205111122223333", BigDecimal("10"), "CUP"))
+            assertTrue(h.repository.signOut())
+            assertTrue(h.store.cache.value.keys.none { it.first == owner })
+            assertTrue(h.store.history.value.keys.none { it.first == owner })
+            assertTrue(h.store.links.value.keys.none { it.first == owner })
+            assertEquals(1, h.store.journal.value.size)
+        }
     }
 
     @Test fun refreshFillsAccountCardsBalancesAndTheSevenDayHistoryForTheOwner() = runBlocking {

@@ -65,6 +65,7 @@ import dev.duardo.neotransfer.plus.ui.model.PaymentResultUi
 interface ResultActions {
     fun done()
     fun open()
+    fun saveContact()
 }
 
 /**
@@ -86,6 +87,7 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                     OperationStatus.Confirmed -> ConfirmedMark(128.dp)
                     OperationStatus.Sending -> SendingMark()
                     OperationStatus.Rejected -> Glyph(Ds.drawable.ic_close, Neo.colors.dangerContainer, Neo.colors.danger)
+                    OperationStatus.NotSent -> Glyph(Ds.drawable.ic_close, Neo.colors.neutralContainer, Neo.colors.neutral)
                     else -> Glyph(Ds.drawable.ic_sync_problem, Neo.colors.warningContainer, Neo.colors.warning)
                 }
                 Spacer(Modifier.height(NeoSpace.xxl))
@@ -96,7 +98,7 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                     Text("${formatMoney(money.amount, money.currency)}$to${operation.title}", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
                 }
                 val note = when (operation.status) {
-                    OperationStatus.Rejected, OperationStatus.Unconfirmed -> operation.reason
+                    OperationStatus.Rejected, OperationStatus.Unconfirmed, OperationStatus.NotSent -> operation.reason
                     OperationStatus.Confirmed -> operation.transactionId?.let { "Transacción $it" }
                     else -> null
                 }
@@ -116,7 +118,8 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                 Spacer(Modifier.height(NeoSpace.huge))
             }
             if (operation.status != OperationStatus.Sending) BottomAction {
-                NeoButton("Ver operación", actions::open, style = NeoButtonStyle.Tonal)
+                if (state.canSaveContact) NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
+                else if (operation.status != OperationStatus.NotSent) NeoButton("Ver operación", actions::open, style = NeoButtonStyle.Tonal)
                 NeoButton("Volver al inicio", actions::done)
             }
         }

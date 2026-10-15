@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window behind Compose: the theme's background, so launch shows no flash. -->
+    <style name="Theme.NeoTransferPlus" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+    <color name="background">#FFF3F4F6</color>
+</resources>

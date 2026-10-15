@@ -29,6 +29,8 @@ internal interface EnzonaLocalStore : EnzonaPaymentJournal {
     fun observeCardLinks(owner: String): Flow<List<EnzonaCardLink>>
     suspend fun putCardLink(link: EnzonaCardLink)
     fun observeJournal(owner: String): Flow<List<EnzonaJournalEntry>>
+    /** Erases the owner's cached reads, history and card links. Never touches the payment journal. */
+    suspend fun clearOwner(owner: String)
 }
 
 internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLocalStore {
@@ -77,6 +79,16 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
     }
 
     override fun observeJournal(owner: String) = dao.observeJournal(checkOwner(owner))
+
+    override suspend fun clearOwner(owner: String) {
+        checkOwner(owner)
+        database.withTransaction {
+            dao.deleteCache(owner)
+            dao.deleteHistory(owner)
+            dao.deleteHistorySync(owner)
+            dao.deleteCardLinks(owner)
+        }
+    }
 
     /** Duplicate UUID with the exact same intent is idempotent, including after submission. */
     override suspend fun prepareIntent(intent: EnzonaIntent): EnzonaJournalEntry {

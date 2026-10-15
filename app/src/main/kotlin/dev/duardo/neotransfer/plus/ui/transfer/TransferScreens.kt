@@ -50,7 +50,6 @@ import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.common.BottomAction
 import dev.duardo.neotransfer.plus.ui.common.SourceCardPicker
-import dev.duardo.neotransfer.plus.ui.common.SwitchRow
 import dev.duardo.neotransfer.plus.ui.common.numberLine
 import dev.duardo.neotransfer.plus.ui.model.ContactUi
 import dev.duardo.neotransfer.plus.ui.model.RecipientPickUi
@@ -253,7 +252,6 @@ private fun RecipientHeader(recipient: RecipientUi) {
 
 interface ReviewActions {
     fun back()
-    fun saveContact(value: Boolean)
     fun confirm()
 }
 
@@ -282,9 +280,6 @@ fun TransferReviewScreen(state: TransferReviewUi, actions: ReviewActions, modifi
             confirmIcon = Ds.drawable.ic_fingerprint,
             confirming = state.sending,
             lead = { RecipientHeader(recipient) },
-            extra = {
-                state.saveContact?.let { save -> SwitchRow("Guardar como contacto", save, actions::saveContact, Modifier.padding(top = NeoSpace.s)) }
-            },
         )
     }
 }

@@ -29,7 +29,8 @@ val OperationUi.statusText: String
         OperationStatus.Pending -> "Pendiente"
         OperationStatus.Rejected -> "Rechazada"
         OperationStatus.Unconfirmed -> "Sin confirmar"
-        OperationStatus.Other -> statusLabel ?: "Sin estado"
+        OperationStatus.NotSent -> "No enviada"
+        OperationStatus.Other -> statusLabel.orEmpty()
     }
 
 val OperationStatus.tone: StatusTone
@@ -38,7 +39,7 @@ val OperationStatus.tone: StatusTone
         OperationStatus.Confirmed -> StatusTone.Positive
         OperationStatus.Rejected -> StatusTone.Danger
         OperationStatus.Unconfirmed -> StatusTone.Warning
-        OperationStatus.Other -> StatusTone.Neutral
+        OperationStatus.NotSent, OperationStatus.Other -> StatusTone.Neutral
     }
 
 @get:DrawableRes
@@ -48,15 +49,17 @@ val OperationStatus.icon: Int
         OperationStatus.Confirmed -> Ds.drawable.ic_check_circle
         OperationStatus.Rejected -> Ds.drawable.ic_cancel
         OperationStatus.Unconfirmed -> Ds.drawable.ic_sync_problem
+        OperationStatus.NotSent -> Ds.drawable.ic_close
         OperationStatus.Other -> Ds.drawable.ic_info
     }
 
 /** Money that certainly did not move is shown struck through. */
-val OperationStatus.moneyMoved: Boolean get() = this != OperationStatus.Rejected
+val OperationStatus.moneyMoved: Boolean get() = this != OperationStatus.Rejected && this != OperationStatus.NotSent
 
+/** Nothing when ENZONA gave no state word at all. */
 @Composable
 fun OperationStatusChip(operation: OperationUi, modifier: Modifier = Modifier) {
-    StatusChip(operation.statusText, operation.status.tone, operation.status.icon, modifier)
+    if (operation.statusText.isNotEmpty()) StatusChip(operation.statusText, operation.status.tone, operation.status.icon, modifier)
 }
 
 val OperationKind.label: String

@@ -113,6 +113,11 @@ internal interface EnzonaDao {
     @Query("UPDATE intent_journal SET state = 'UNKNOWN' WHERE ownerSubject = :owner AND id = :id AND state = 'SUBMITTING'")
     fun markTimedOut(owner: String, id: String): Int
 
+    @Query("DELETE FROM read_cache WHERE ownerSubject = :owner") fun deleteCache(owner: String)
+    @Query("DELETE FROM transaction_history WHERE ownerSubject = :owner") fun deleteHistory(owner: String)
+    @Query("DELETE FROM history_sync WHERE ownerSubject = :owner") fun deleteHistorySync(owner: String)
+    @Query("DELETE FROM card_links WHERE ownerSubject = :owner") fun deleteCardLinks(owner: String)
+
     // No query edits reviewed intent fields, replaces journal rows, or deletes money records.
     @Query("UPDATE intent_journal SET state = :state, remoteId = :remoteId WHERE ownerSubject = :owner AND id = :id")
     fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?)

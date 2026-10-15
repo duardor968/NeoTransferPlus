@@ -266,18 +266,33 @@ object PreviewCatalog {
         "transfer-amount-account" to {
             TransferAmountScreen(TransferAmountUi(PreviewData.accountRecipient, "750", "CUP", wallet, 2, false, true, fixed = true), noop())
         },
-        "transfer-review" to { TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa, saveContact = null), noop()) },
+        "transfer-review" to { TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop()) },
         "transfer-review-new" to {
-            TransferReviewScreen(TransferReviewUi(RecipientUi.Card(ForeignCardUi("t", "9205880012345673", "BANDEC")), cup("1250.00"), bandec, saveContact = true), noop())
+            TransferReviewScreen(TransferReviewUi(RecipientUi.Card(ForeignCardUi("t", "9205880012345673", "BANDEC")), cup("1250.00"), bandec), noop())
         },
-        "transfer-review-account" to { TransferReviewScreen(TransferReviewUi(PreviewData.accountRecipient, cup("750.00"), banmet, saveContact = null), noop()) },
+        "transfer-review-account" to { TransferReviewScreen(TransferReviewUi(PreviewData.accountRecipient, cup("750.00"), banmet), noop()) },
         "transfer-password" to {
-            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa, saveContact = null), noop())
+            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
             PasswordSheet(PasswordSheetUi("contraseña", "Guardar y transferir"), noop())
         },
         "payment-sending" to { PaymentResultScreen(PaymentResultUi(PreviewData.sendingToMaria), noop()) },
         "payment-confirmed" to {
             PaymentResultScreen(PaymentResultUi(PreviewData.sendingToMaria.copy(status = OperationStatus.Confirmed, transactionId = "4f1c9a20-7b3e-4d61-8e0a-52c7d9b1a6e3")), noop())
+        },
+        "payment-confirmed-new" to {
+            PaymentResultScreen(
+                PaymentResultUi(
+                    PreviewData.sendingToMaria.copy(title = "9205 8800 1234 5673", contactId = null, status = OperationStatus.Confirmed),
+                    canSaveContact = true,
+                ),
+                noop(),
+            )
+        },
+        "payment-not-sent" to {
+            PaymentResultScreen(
+                PaymentResultUi(PreviewData.sendingToMaria.copy(status = OperationStatus.NotSent, reason = "No se envió. No hay conexión con ENZONA o la sesión caducó.")),
+                noop(),
+            )
         },
         "payment-unconfirmed" to { PaymentResultScreen(PaymentResultUi(PreviewData.unconfirmedToYunior), noop()) },
         "payment-rejected" to { PaymentResultScreen(PaymentResultUi(PreviewData.landlineRejected), noop()) },

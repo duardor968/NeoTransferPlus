@@ -14,7 +14,7 @@ sealed interface LockUi {
 }
 
 /** Why access to ENZONA needs attention, in the user's terms. */
-enum class LoginProblem { Rejected, ClientRejected, Expired, Offline, PageFailed, RestoreFailed, ClearFailed }
+enum class LoginProblem { Rejected, ClientRejected, Denied, ServerError, Expired, Offline, PageFailed, RestoreFailed, ClearFailed }
 
 @Immutable
 sealed interface LoginUi {
@@ -174,13 +174,11 @@ data class TransferAmountUi(
     val fixed: Boolean = false,
 )
 
-/** [saveContact] null when the recipient is already a contact or is an ENZONA account. */
 @Immutable
 data class TransferReviewUi(
     val recipient: RecipientUi,
     val amount: Money,
     val source: CardUi,
-    val saveContact: Boolean?,
     val sending: Boolean = false,
 )
 
@@ -216,9 +214,9 @@ sealed interface ReceiveUi {
 @Immutable
 data class PasswordSheetUi(val value: String, val action: String, val error: String? = null)
 
-/** Outcome of one payment. [operation] carries what was sent. */
+/** Outcome of one payment. [operation] carries what was sent; [canSaveContact] for a card that is nobody's yet. */
 @Immutable
-data class PaymentResultUi(val operation: OperationUi)
+data class PaymentResultUi(val operation: OperationUi, val canSaveContact: Boolean = false)
 
 // ---- Settings -----------------------------------------------------------------------------------------------
 

@@ -48,6 +48,8 @@ val LoginProblem.message: String
     get() = when (this) {
         LoginProblem.Rejected -> "No se pudo completar el acceso. Inténtalo de nuevo."
         LoginProblem.ClientRejected -> "ENZONA no permite el acceso desde esta app."
+        LoginProblem.Denied -> "ENZONA denegó el acceso a esta cuenta."
+        LoginProblem.ServerError -> "ENZONA no pudo completar el acceso. Inténtalo más tarde."
         LoginProblem.Expired -> "Tu sesión de ENZONA caducó. Entra de nuevo."
         LoginProblem.Offline -> "No hay conexión con ENZONA."
         LoginProblem.PageFailed -> "La página de ENZONA no cargó."

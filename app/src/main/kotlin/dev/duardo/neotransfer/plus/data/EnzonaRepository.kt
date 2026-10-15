@@ -183,12 +183,19 @@ class EnzonaRepository internal constructor(
     fun acceptLoginCallback(url: String, isMainFrame: Boolean = true): Boolean = session.acceptCallback(url, isMainFrame)
     fun clearSessionFailure() = session.clearFailure()
 
-    /** Local sign-out: stored tokens, WebView cookies and the periodic check. Cached data stays per owner. */
+    /**
+     * Local sign-out: stored tokens, WebView cookies, the periodic check and the owner's cached reads (account, cards,
+     * balances, history, completed card numbers). The payment journal stays: it is the record of money sent.
+     */
     suspend fun signOut(): Boolean {
+        val owner = session.state.value.ownerSubject
         val cleared = session.signOut()
         scheduler.cancel()
-        if (cleared) try { clearWebSession() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
-        return cleared
+        if (!cleared) return false
+        val cacheCleared = owner == null || try { store.clearOwner(owner); true }
+            catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { false }
+        try { clearWebSession() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {}
+        return cacheCleared
     }
 
     // Reads ----------------------------------------------------------------------------------------
@@ -358,7 +365,7 @@ class EnzonaRepository internal constructor(
     private fun failureOf(failure: Exception): EnzonaFailure = when (failure) {
         is EnzonaSessionUnavailableException -> when (failure.failure) {
             EnzonaSessionFailure.SIGN_IN_AGAIN, EnzonaSessionFailure.RESTORE_FAILED -> EnzonaFailure.SIGNED_OUT
-            EnzonaSessionFailure.CLIENT_REJECTED -> EnzonaFailure.REJECTED
+            EnzonaSessionFailure.CLIENT_REJECTED, EnzonaSessionFailure.ACCESS_DENIED, EnzonaSessionFailure.SERVER_ERROR -> EnzonaFailure.REJECTED
             else -> EnzonaFailure.NETWORK
         }
         is InterruptedIOException -> EnzonaFailure.TIMEOUT

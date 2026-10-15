@@ -283,6 +283,33 @@ class EnzonaSessionTest {
         }
     }
 
+    @Test fun loginFailuresKeepTheirMeaningForTheUser() = runBlocking {
+        val cases = listOf<Pair<Exception, EnzonaSessionFailure>>(
+            EnzonaApiException(400, EnzonaOAuthFailure.ACCESS_DENIED) to EnzonaSessionFailure.ACCESS_DENIED,
+            EnzonaApiException(503, EnzonaOAuthFailure.TEMPORARILY_UNAVAILABLE) to EnzonaSessionFailure.SERVER_ERROR,
+            EnzonaApiException(500, EnzonaOAuthFailure.UNKNOWN) to EnzonaSessionFailure.SERVER_ERROR,
+            EnzonaApiException(400, EnzonaOAuthFailure.UNAUTHORIZED_CLIENT) to EnzonaSessionFailure.CLIENT_REJECTED,
+            IOException("PRIVATE") to EnzonaSessionFailure.UNAVAILABLE,
+        )
+        for ((failure, expected) in cases) {
+            val network = FakeNetwork().apply { exchange = { throw failure } }
+            session(MemoryTokens(), network).use { manager ->
+                manager.beginLogin()
+                assertTrue(manager.acceptCallback(callback(manager.state.value.authorizationUrl!!)))
+                assertEquals(expected, manager.state.value.failure)
+                assertFalse(manager.state.value.signedIn)
+                assertNull(manager.state.value.authorizationUrl)
+            }
+        }
+        // ENZONA answering the account read with an HTTP error is ENZONA's problem, not the connection's.
+        val network = FakeNetwork().apply { account = { throw EnzonaApiException(500) } }
+        session(MemoryTokens(), network).use { manager ->
+            manager.beginLogin()
+            manager.acceptCallback(callback(manager.state.value.authorizationUrl!!))
+            assertEquals(EnzonaSessionFailure.SERVER_ERROR, manager.state.value.failure)
+        }
+    }
+
     @Test fun expireForcesOneRefreshOnlyForTheRejectedToken() = runBlocking {
         val store = MemoryTokens(token("current"))
         val network = FakeNetwork()
