@@ -50,7 +50,6 @@ class EnzonaApisTest {
             assertEquals(1234L, api.cards(tokens).observedAt)
             assertEquals("cup", api.balance(tokens, "synthetic-card-uuid").value.currency)
             api.transactions(tokens, LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 7))
-            api.transactionPage(tokens, "?offset=8&limit=8")
         }
         assertEquals("/coremz/1.0.2/card/username/owner@carbon.super", requests[0].url.encodedPath)
         assertEquals("/coremz/1.0.2/api/balance/lastOperations/synthetic-card-uuid", requests[1].url.encodedPath)
@@ -59,7 +58,6 @@ class EnzonaApisTest {
         assertEquals("0", requests[2].url.queryParameter("offset"))
         assertEquals("2026-10-01", requests[2].url.queryParameter("start_date_filter"))
         assertEquals("2026-10-07", requests[2].url.queryParameter("end_date_filter"))
-        assertEquals("8", requests[3].url.queryParameter("offset"))
         requests.forEach { request ->
             assertEquals("GET", request.method)
             assertNull(request.body)
@@ -67,17 +65,6 @@ class EnzonaApisTest {
             assertEquals("application/json", request.header("accept"))
             assertEquals("1.9.11.241103", request.header("Version"))
         }
-    }
-
-    @Test fun paginationCannotRedirectCredentialsToAnotherHostOrOperation() = runBlocking {
-        var sends = 0
-        val api = EnzonaReadApi({ sends++; error("Unexpected network call") })
-        for (link in listOf("https://untrusted.example/", "http://api.enzona.net/operations/v1.0.0/operations/account",
-            "/transfer/v1.0.0/transfer/card", "https://user@api.enzona.net/operations/v1.0.0/operations/account",
-            "https://api.enzona.net:8443/operations/v1.0.0/operations/account")) {
-            assertFailsWith<IllegalArgumentException> { api.transactionPage(tokens, link) }
-        }
-        assertEquals(0, sends)
     }
 
     @Test fun rejectedTokenIsReportedSoTheSessionRenewsInsteadOfDecodingAnError() = runBlocking {

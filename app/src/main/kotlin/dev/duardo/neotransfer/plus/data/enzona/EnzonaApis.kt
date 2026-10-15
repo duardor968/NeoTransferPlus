@@ -50,7 +50,10 @@ internal class EnzonaReadApi(private val execute: EnzonaExecute, private val now
     suspend fun balance(tokens: EnzonaTokens, cardUuid: String): EnzonaFetched<EnzonaCardBalance> =
         fetch(api("coremz", "1.0.2", "api", "balance", "lastOperations", identifier(cardUuid)), tokens, EnzonaReadJson::balance)
 
-    /** Main history flow (TransactionControllerNew): limit 100000, offset 0, `yyyy-MM-dd` dates. */
+    /**
+     * Main history flow (TransactionControllerNew): limit 100000, offset 0, `yyyy-MM-dd` dates. Like the APK,
+     * pagination links are not followed; their shape is not established by the AOT.
+     */
     suspend fun transactions(
         tokens: EnzonaTokens, from: LocalDate, through: LocalDate, offset: Int = 0, limit: Int = 100_000,
     ): EnzonaFetched<EnzonaTransactionPage> {
@@ -59,17 +62,6 @@ internal class EnzonaReadApi(private val execute: EnzonaExecute, private val now
             .addQueryParameter("limit", limit.toString()).addQueryParameter("offset", offset.toString())
             .addQueryParameter("start_date_filter", from.toString())
             .addQueryParameter("end_date_filter", through.toString()).build()
-        return fetch(url, tokens, EnzonaReadJson::transactions)
-    }
-
-    /** A provider pagination link may never forward a bearer token to another origin or API. */
-    suspend fun transactionPage(tokens: EnzonaTokens, next: String): EnzonaFetched<EnzonaTransactionPage> {
-        val base = api("operations", "v1.0.0", "operations", "account")
-        val url = requireNotNull(base.resolve(next)) { "La página de actividad no es válida" }
-        require(url.scheme == base.scheme && url.host == base.host && url.port == base.port &&
-            url.username.isEmpty() && url.password.isEmpty() && url.fragment == null && url.encodedPath == base.encodedPath) {
-            "La página de actividad no es válida"
-        }
         return fetch(url, tokens, EnzonaReadJson::transactions)
     }
 
