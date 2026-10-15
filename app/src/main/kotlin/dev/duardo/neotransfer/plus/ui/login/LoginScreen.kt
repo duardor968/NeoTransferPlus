@@ -83,12 +83,9 @@ fun LoginScreen(state: LoginUi, actions: LoginActions, web: @Composable () -> Un
                 },
             ) { padding -> Box(Modifier.fillMaxSize().padding(padding)) { web() } }
         }
-        LoginUi.Connecting -> BrandBackdrop(modifier) {
-            Spacer(Modifier.weight(0.8f))
-            BrandBlock(locked = false)
-            Spacer(Modifier.weight(1.2f))
+        LoginUi.Connecting -> Entry(modifier) {
             Row(
-                Modifier.navigationBarsPadding().padding(bottom = NeoSpace.huge),
+                Modifier.padding(bottom = NeoSpace.huge),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(NeoSpace.m),
             ) {
@@ -99,14 +96,24 @@ fun LoginScreen(state: LoginUi, actions: LoginActions, web: @Composable () -> Un
     }
 }
 
+/** The entry backdrop with the mark exactly where the lock screen has it; [bottom] floats over its lower edge. */
+@Composable
+private fun Entry(modifier: Modifier, bottom: @Composable () -> Unit) {
+    Box(modifier.fillMaxSize()) {
+        BrandBackdrop {
+            Spacer(Modifier.weight(0.8f))
+            BrandBlock(locked = false)
+            Spacer(Modifier.weight(1.2f))
+        }
+        Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding()) { bottom() }
+    }
+}
+
 @Composable
 private fun Welcome(problem: LoginProblem?, actions: LoginActions, modifier: Modifier) {
-    BrandBackdrop(modifier) {
-        Spacer(Modifier.weight(0.8f))
-        BrandBlock(locked = false)
-        Spacer(Modifier.weight(1.2f))
+    Entry(modifier) {
         Column(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.xxl),
+            Modifier.fillMaxWidth().padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.xxl),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(NeoSpace.l),
         ) {

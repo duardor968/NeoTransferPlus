@@ -5,11 +5,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -53,6 +51,7 @@ import dev.duardo.neotransfer.plus.designsystem.card.CardAspectRatio
 import dev.duardo.neotransfer.plus.designsystem.card.CardCarousel
 import dev.duardo.neotransfer.plus.designsystem.card.CardShape
 import dev.duardo.neotransfer.plus.designsystem.card.PagerDots
+import dev.duardo.neotransfer.plus.designsystem.component.FittedText
 import dev.duardo.neotransfer.plus.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.plus.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.plus.designsystem.component.MoneyText
@@ -65,7 +64,6 @@ import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.plus.designsystem.component.QuickAction
 import dev.duardo.neotransfer.plus.designsystem.component.SectionHeader
-import dev.duardo.neotransfer.plus.designsystem.component.dashedOutline
 import dev.duardo.neotransfer.plus.designsystem.component.skeleton
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
@@ -175,15 +173,25 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                     contentKey = { it?.card?.id },
                     label = "balance",
                 ) { wallet ->
-                    Box(Modifier.fillMaxWidth().heightIn(min = if (wallet != null) 112.dp else NeoSpace.l), contentAlignment = Alignment.Center) {
-                        if (wallet != null) Balance(wallet, state.refresh == RefreshState.Failed, labels::ago) { actions.refreshBalance(wallet.card.id) }
+                    val loading = wallet == null && state.recent == null
+                    Box(Modifier.fillMaxWidth().heightIn(min = if (wallet != null || loading) 112.dp else NeoSpace.l), contentAlignment = Alignment.Center) {
+                        when {
+                            wallet != null -> Balance(wallet, state.refresh == RefreshState.Failed, labels::ago) { actions.refreshBalance(wallet.card.id) }
+                            // Same footprint as the balance and its freshness, so nothing jumps when the cards arrive.
+                            loading -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+                                Box(Modifier.width(200.dp).height(44.dp).skeleton())
+                                Box(Modifier.width(180.dp).height(36.dp).skeleton(CircleShape))
+                            }
+                        }
                     }
                 }
             }
             item(key = "actions") {
+                // Transferring and paying need a card; receiving goes to the ENZONA account.
+                val canPay = state.cards.isNotEmpty()
                 Row(Modifier.fillMaxWidth().padding(horizontal = NeoSpace.m, vertical = NeoSpace.s)) {
-                    QuickAction(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, Modifier.weight(1f), primary = true)
-                    QuickAction(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay, Modifier.weight(1f))
+                    QuickAction(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, Modifier.weight(1f), primary = true, enabled = canPay)
+                    QuickAction(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay, Modifier.weight(1f), enabled = canPay)
                     QuickAction(Ds.drawable.ic_south_west, "Cobrar", actions::receive, Modifier.weight(1f))
                 }
             }
@@ -225,19 +233,16 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
     if (sheet != null && sheetActions != null) CardSheet(sheet, sheetActions)
 }
 
-/** ENZONA lists no card for this account: the slot keeps the card's footprint. */
+/** ENZONA lists no card for this account: a plain panel with the card's footprint, nothing to press. */
 @Composable
 private fun NoCardsSlot() {
-    val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
     Column(
-        Modifier.fillMaxWidth().aspectRatio(CardAspectRatio).clip(CardShape)
-            .dashedOutline(outline, maxWidth / CardAspectRatio * 0.06f).padding(NeoSpace.xl),
+        Modifier.fillMaxWidth().aspectRatio(CardAspectRatio).clip(CardShape).background(Neo.colors.group).padding(NeoSpace.xl),
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(48.dp).border(1.5.dp, outline, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(painterResource(Ds.drawable.ic_credit_card), null, tint = MaterialTheme.colorScheme.onSurface)
+        Box(Modifier.size(48.dp).background(Neo.colors.neutralContainer, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(Ds.drawable.ic_credit_card), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text("Sin tarjetas vinculadas", style = MaterialTheme.typography.titleSmall)
         Text(
@@ -246,7 +251,6 @@ private fun NoCardsSlot() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
-    }
     }
 }
 
@@ -298,10 +302,12 @@ private fun InProgressRow(operation: OperationUi, ago: (Instant) -> String, open
         operation.title,
         leading = { OperationAvatar(operation) },
         supportingContent = {
-            Text(
-                listOfNotNull(operation.statusText, operation.at?.let(ago)).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
+            // One line: time and state read together, never split.
+            FittedText(
+                listOfNotNull(operation.at?.let(ago), operation.statusText).joinToString(" · "),
+                MaterialTheme.typography.bodyMedium,
                 color = if (unconfirmed) Neo.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                minScale = 0.7f,
             )
         },
         trailing = { OperationAmount(operation) },

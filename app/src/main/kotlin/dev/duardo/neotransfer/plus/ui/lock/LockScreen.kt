@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -72,11 +73,12 @@ fun BrandBlock(locked: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
         BrandMark(112.dp)
         Text(AppName, style = MaterialTheme.typography.headlineSmall)
-        if (locked) Box(
-            Modifier.size(36.dp).background(Neo.colors.neutralContainer, CircleShape),
+        // The lock's slot stays reserved when unlocked so the mark sits at the same height on every entry screen.
+        Box(
+            Modifier.size(36.dp).alpha(if (locked) 1f else 0f).background(Neo.colors.neutralContainer, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(painterResource(Ds.drawable.ic_lock), "Bloqueada", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (locked) Icon(painterResource(Ds.drawable.ic_lock), "Bloqueada", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

@@ -89,7 +89,7 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
     val refreshing = state.refresh == RefreshState.Refreshing && state.content != ActivityContent.Loading
     Column(modifier.fillMaxSize()) {
         Column(Modifier.statusBarsPadding().padding(horizontal = NeoSpace.gutter)) {
-            Row(Modifier.fillMaxWidth().padding(top = NeoSpace.m, bottom = NeoSpace.s), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(top = NeoSpace.m, bottom = NeoSpace.s).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Actividad", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
                 if (!account && state.cards.size > 1) CardFilter(state, actions)
             }

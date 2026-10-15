@@ -24,13 +24,13 @@ class TimeLabels(private val clock: Clock) {
 
     fun date(at: Instant): LocalDate = zoned(at).toLocalDate()
 
-    /** "ahora", "hace 5 min", "hace 2 h", then the short date-time. */
+    /** "ahora", "hace 5 min", "hace 2 h", then the short date-time. Non-breaking spaces: it never wraps inside. */
     fun ago(at: Instant): String {
         val elapsed = Duration.between(at, clock.instant())
         return when {
             elapsed.toMinutes() < 1 -> "ahora"
-            elapsed.toMinutes() < 60 -> "hace ${elapsed.toMinutes()} min"
-            elapsed.toHours() < 12 -> "hace ${elapsed.toHours()} h"
+            elapsed.toMinutes() < 60 -> "hace\u00A0${elapsed.toMinutes()}\u00A0min"
+            elapsed.toHours() < 12 -> "hace\u00A0${elapsed.toHours()}\u00A0h"
             else -> moment(at)
         }
     }

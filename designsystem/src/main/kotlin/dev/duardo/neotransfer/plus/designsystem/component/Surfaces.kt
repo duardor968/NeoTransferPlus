@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
@@ -61,11 +62,19 @@ import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 
 /** Round shortcut with its label. One [primary] per row carries the accent. */
 @Composable
-fun QuickAction(@DrawableRes icon: Int, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false) {
+fun QuickAction(
+    @DrawableRes icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    enabled: Boolean = true,
+) {
     val container = if (primary) Neo.colors.accent else Neo.colors.group
     val content = if (primary) Neo.colors.onAccent else MaterialTheme.colorScheme.onSurface
     Column(
-        modifier.clip(RoundedCornerShape(NeoRadius.field)).clickable(onClick = onClick).padding(vertical = NeoSpace.s),
+        modifier.alpha(if (enabled) 1f else 0.38f).clip(RoundedCornerShape(NeoRadius.field))
+            .clickable(enabled = enabled, onClick = onClick).padding(vertical = NeoSpace.s),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
     ) {

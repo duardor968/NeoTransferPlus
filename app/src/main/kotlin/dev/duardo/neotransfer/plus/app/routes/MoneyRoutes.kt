@@ -22,6 +22,7 @@ import dev.duardo.neotransfer.plus.app.toUi
 import dev.duardo.neotransfer.plus.core.money.Amounts
 import dev.duardo.neotransfer.plus.core.payment.EnzonaAccountTransferDraft
 import dev.duardo.neotransfer.plus.core.payment.EnzonaCardTransferDraft
+import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentDraft
 import dev.duardo.neotransfer.plus.core.payment.EnzonaQrMerchantPaymentDraft
 import dev.duardo.neotransfer.plus.core.qr.EnzonaQrCode
@@ -260,10 +261,18 @@ fun ReviewRoute(plus: PlusApp, dest: Dest.Review) {
 fun ResultRoute(plus: PlusApp, intentId: String) {
     val operation = rememberOperation(plus, "j:$intentId") ?: return
     val contacts by plus.contactList.collectAsState()
+    val journal by plus.journal.collectAsState()
+    val authorizer = LocalAuthorizer.current
     val pan = (operation.counterpart as? CounterpartUi.Card)?.number
     val canSave = operation.kind == OperationKind.CardTransfer && operation.status == OperationStatus.Confirmed &&
         pan != null && contacts.orEmpty().none { contact -> contact.cards.any { it.pan == pan } }
     val actions = object : ResultActions {
+        override fun retry() {
+            // Nothing was sent: the reviewed intent is still unused, so it may be sent once, with a new approval.
+            val intent = journal?.firstOrNull { it.intent.id == intentId && it.state == EnzonaIntentState.PREPARED }?.intent ?: return
+            val money = operation.amount?.let { formatMoney(it.amount, it.currency) }.orEmpty()
+            authorizer.authorize("Enviar $money", operation.title, "Guardar y enviar", onPassword = { plus.submit(intent, it) }, onProblem = plus::say)
+        }
         override fun done() = plus.nav.home()
         override fun open() = plus.nav.replace(Dest.Operation("j:$intentId"))
         override fun saveContact() {

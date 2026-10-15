@@ -169,7 +169,7 @@ object PreviewCatalog {
             ContactEditScreen(
                 ContactEditUi(
                     PreviewData.juan.id, "Juan Carlos Pérez",
-                    listOf(EditableCardUi("jc-1", "9205990144718265", "Salario", "BANDEC"), EditableCardUi("jc-3", "92123331880421", "")),
+                    listOf(EditableCardUi("jc-1", "9205990144718265", "Salario", "BANDEC"), EditableCardUi("jc-3", "92123331880421", "", error = "Número incompleto")),
                     listOf(EditablePhoneUi("p1", "53124578"), EditablePhoneUi("p2", "5441772", error = "Número incompleto")),
                     canSave = false,
                 ),
@@ -290,7 +290,7 @@ object PreviewCatalog {
         },
         "payment-not-sent" to {
             PaymentResultScreen(
-                PaymentResultUi(PreviewData.sendingToMaria.copy(status = OperationStatus.NotSent, reason = "No se envió. No hay conexión con ENZONA o la sesión caducó.")),
+                PaymentResultUi(PreviewData.sendingToMaria.copy(status = OperationStatus.NotSent, reason = "No hubo conexión con ENZONA. No se movió dinero.")),
                 noop(),
             )
         },
@@ -325,7 +325,14 @@ object PreviewCatalog {
         "settings-password-saved" to { PasswordSettingsScreen(PasswordSettingsUi(saved = true, value = "secreto"), noop()) },
         "settings-about" to { AboutScreen("0.1.0", noop()) },
         "settings-licenses" to {
-            LicensesScreen(listOf("Inter" to "SIL Open Font License, Version 1.1\n\nCopyright 2020 The Inter Project Authors."), {})
+            LicensesScreen(
+                listOf(
+                    "Inter" to "Copyright 2020 The Inter Project Authors.\n\nSIL Open Font License, Version 1.1.",
+                    "Arimo" to "Copyright 2010 Google Corporation.\n\nSIL Open Font License, Version 1.1.",
+                    "Material Symbols" to "Copyright Google LLC.\n\nApache License, Version 2.0.",
+                ),
+                {},
+            )
         },
     )
 

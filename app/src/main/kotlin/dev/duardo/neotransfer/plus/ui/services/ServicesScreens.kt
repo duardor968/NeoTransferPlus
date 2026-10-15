@@ -47,8 +47,6 @@ import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.plus.designsystem.component.SectionHeader
-import dev.duardo.neotransfer.plus.designsystem.component.SummaryLine
-import dev.duardo.neotransfer.plus.designsystem.component.SummaryLines
 import dev.duardo.neotransfer.plus.designsystem.component.dashedOutline
 import dev.duardo.neotransfer.plus.designsystem.component.skeleton
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
@@ -159,10 +157,10 @@ private fun ReferenceTile(reference: RecentReferenceUi, kind: String?, modifier:
         Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(NeoSpace.s))
         // References are identifiers: one line, never split mid-number.
-        FittedText(reference.value.removeSuffix("@nauta.com.cu"), MaterialTheme.typography.titleSmall, minScale = 0.5f)
+        FittedText(reference.value, MaterialTheme.typography.titleSmall, minScale = 0.5f)
         kind?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         reference.lastPaid?.let {
-            Text(formatMoney(it.amount, it.currency), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Último pago: ${formatMoney(it.amount, it.currency)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -208,6 +206,7 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     },
                     imeAction = ImeAction.Search,
                     error = state.referenceError,
+                    supporting = owner(lookup)?.let { "Titular: $it" },
                 )
                 when (lookup) {
                     ServiceLookupUi.None -> Unit
@@ -215,18 +214,13 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     is ServiceLookupUi.Failed -> Problem(lookup.message)
                     is ServiceLookupUi.Bills -> Bills(lookup, actions)
                     is ServiceLookupUi.PhoneBill -> {
-                        lookup.owner?.let { Owner(it) }
                         Column(Modifier.fillMaxWidth().padding(vertical = NeoSpace.m), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Factura", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             MoneyText(lookup.due.amount, lookup.due.currency, style = MaterialTheme.typography.displaySmall, hero = true)
                         }
                     }
                     is ServiceLookupUi.TopUp -> {
-                        val lines = listOfNotNull(
-                            lookup.owner?.let { SummaryLine("Titular", it) },
-                            lookup.debt?.let { SummaryLine("Deuda", formatMoney(it.amount, it.currency)) },
-                        )
-                        if (lines.isNotEmpty()) NeoGroup { SummaryLines(lines) }
+                        lookup.debt?.let { Problem("Deuda pendiente: ${formatMoney(it.amount, it.currency)}. La recarga no la paga.") }
                         NeoTextField(
                             state.amount, actions::amount, "Importe",
                             keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done,
@@ -270,14 +264,15 @@ private fun payLabel(state: ServiceFormUi): String {
     return money?.let { "$verb ${formatMoney(it.amount, it.currency)}" } ?: verb
 }
 
-@Composable
-private fun Owner(name: String) {
-    NeoGroup { SummaryLines(listOf(SummaryLine("Titular", name))) }
+private fun owner(lookup: ServiceLookupUi): String? = when (lookup) {
+    is ServiceLookupUi.Bills -> lookup.owner
+    is ServiceLookupUi.PhoneBill -> lookup.owner
+    is ServiceLookupUi.TopUp -> lookup.owner
+    else -> null
 }
 
 @Composable
 private fun Bills(lookup: ServiceLookupUi.Bills, actions: ServiceFormActions) {
-    lookup.owner?.let { Owner(it) }
     if (lookup.bills.isEmpty()) {
         Problem("No hay facturas para este código")
         return
@@ -285,7 +280,7 @@ private fun Bills(lookup: ServiceLookupUi.Bills, actions: ServiceFormActions) {
     SectionHeader("Facturas")
     NeoGroup {
         lookup.bills.forEachIndexed { index, bill ->
-            if (index > 0) GroupDivider()
+            if (index > 0) GroupDivider(inset = NeoSpace.l)
             BillRow(bill, selected = bill.id == lookup.selected) { actions.bill(bill.id) }
         }
     }

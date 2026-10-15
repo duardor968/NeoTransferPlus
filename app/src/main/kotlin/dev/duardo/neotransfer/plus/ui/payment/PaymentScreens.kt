@@ -66,6 +66,8 @@ interface ResultActions {
     fun done()
     fun open()
     fun saveContact()
+    /** Only for a payment that never left the phone: the same reviewed values, a new fingerprint. */
+    fun retry()
 }
 
 /**
@@ -118,9 +120,17 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                 Spacer(Modifier.height(NeoSpace.huge))
             }
             if (operation.status != OperationStatus.Sending) BottomAction {
-                if (state.canSaveContact) NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
-                else if (operation.status != OperationStatus.NotSent) NeoButton("Ver operación", actions::open, style = NeoButtonStyle.Tonal)
-                NeoButton("Volver al inicio", actions::done)
+                when {
+                    operation.status == OperationStatus.NotSent -> {
+                        NeoButton("Volver al inicio", actions::done, style = NeoButtonStyle.Tonal)
+                        NeoButton("Enviar de nuevo", actions::retry, icon = Ds.drawable.ic_fingerprint)
+                    }
+                    else -> {
+                        if (state.canSaveContact) NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
+                        else NeoButton("Ver operación", actions::open, style = NeoButtonStyle.Tonal)
+                        NeoButton("Volver al inicio", actions::done)
+                    }
+                }
             }
         }
     }

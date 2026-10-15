@@ -197,10 +197,11 @@ class PlusApp(context: Context) {
      * fingerprint, and stays valid only while the app is unlocked, in front and on the same account.
      */
     fun submit(intent: EnzonaIntent, password: CharArray) {
+        mutableNotSent.update { it - intent.id }
         val owner = session.value.ownerSubject
         if (owner == null) {
             password.fill('\u0000')
-            mutableNotSent.update { it + (intent.id to "No se envió: la sesión de ENZONA terminó.") }
+            mutableNotSent.update { it + (intent.id to "La sesión de ENZONA terminó antes del envío.") }
             return
         }
         val ticket = approval.capture(owner)
@@ -211,12 +212,12 @@ class PlusApp(context: Context) {
                 }
                 mutableNotices.update { it + (intent.id to update.notice) }
             } catch (_: EnzonaPaymentAuthorizationExpiredException) {
-                mutableNotSent.update { it + (intent.id to "No se envió: la autorización caducó al salir de la app.") }
+                mutableNotSent.update { it + (intent.id to "La autorización caducó al salir de la app.") }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 // Thrown only before the single dispatch was granted: nothing left the phone.
-                mutableNotSent.update { it + (intent.id to "No se envió. No hay conexión con ENZONA o la sesión caducó.") }
+                mutableNotSent.update { it + (intent.id to "No hubo conexión con ENZONA. No se movió dinero.") }
             }
         }
     }
