@@ -31,6 +31,7 @@ import dev.duardo.neotransfer.plus.data.EnzonaFailure
 import dev.duardo.neotransfer.plus.data.EnzonaResult
 import dev.duardo.neotransfer.plus.data.contacts.Contact
 import dev.duardo.neotransfer.plus.data.contacts.ContactCard
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.designsystem.component.KeypadKey
 import dev.duardo.neotransfer.plus.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
@@ -40,6 +41,7 @@ import dev.duardo.neotransfer.plus.scanner.ScanMode
 import dev.duardo.neotransfer.plus.scanner.ScanResult
 import dev.duardo.neotransfer.plus.scanner.ScannerView
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
+import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
 import dev.duardo.neotransfer.plus.ui.model.ForeignCardUi
 import dev.duardo.neotransfer.plus.ui.model.Money
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
@@ -64,6 +66,7 @@ import dev.duardo.neotransfer.plus.ui.transfer.RecipientScreen
 import dev.duardo.neotransfer.plus.ui.transfer.ReviewActions
 import dev.duardo.neotransfer.plus.ui.transfer.TransferAmountScreen
 import dev.duardo.neotransfer.plus.ui.transfer.TransferReviewScreen
+import java.util.UUID
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -95,7 +98,7 @@ private fun EnzonaResolvedQr.accountRecipient(): RecipientUi.Account? {
 class Payment(private val plus: PlusApp, private val authorizer: Authorizer) {
     var busy by mutableStateOf(false)
         private set
-    private var prepared: Pair<EnzonaPaymentDraft, dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent>? = null
+    private var prepared: Pair<EnzonaPaymentDraft, EnzonaIntent>? = null
 
     fun pay(draft: EnzonaPaymentDraft, title: String, subtitle: String?, firstTimeAction: String, name: String?) {
         if (busy) return
@@ -257,7 +260,7 @@ fun ReviewRoute(plus: PlusApp, dest: Dest.Review) {
 fun ResultRoute(plus: PlusApp, intentId: String) {
     val operation = rememberOperation(plus, "j:$intentId") ?: return
     val contacts by plus.contactList.collectAsState()
-    val pan = (operation.counterpart as? dev.duardo.neotransfer.plus.ui.model.CounterpartUi.Card)?.number
+    val pan = (operation.counterpart as? CounterpartUi.Card)?.number
     val canSave = operation.kind == OperationKind.CardTransfer && operation.status == OperationStatus.Confirmed &&
         pan != null && contacts.orEmpty().none { contact -> contact.cards.any { it.pan == pan } }
     val actions = object : ResultActions {
@@ -265,7 +268,7 @@ fun ResultRoute(plus: PlusApp, intentId: String) {
         override fun open() = plus.nav.replace(Dest.Operation("j:$intentId"))
         override fun saveContact() {
             val number = pan ?: return
-            plus.nav.push(Dest.ContactEdit(null, Contact("new", "", listOf(ContactCard(java.util.UUID.randomUUID().toString(), number, null)), emptyList())))
+            plus.nav.push(Dest.ContactEdit(null, Contact("new", "", listOf(ContactCard(UUID.randomUUID().toString(), number, null)), emptyList())))
         }
     }
     // The payment goes on by itself: back leaves the flow, it never returns to the review.

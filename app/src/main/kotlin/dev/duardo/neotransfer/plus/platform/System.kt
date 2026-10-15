@@ -6,10 +6,17 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.Settings
+import androidx.core.content.FileProvider
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import dev.duardo.neotransfer.plus.data.contacts.Contact
+import java.io.File
 import java.util.UUID
 
 /** Share sheet with plain text (receipts, receive codes). */
@@ -69,24 +76,20 @@ fun Context.readPickedContact(uri: Uri): Contact {
 
 /** Shares the receive QR as an image (white plate, dark modules) with [caption] as its text. */
 fun Context.shareQr(payload: String, caption: String) {
-    val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(
-        payload, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0,
-        mapOf(
-            com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.H,
-            com.google.zxing.EncodeHintType.MARGIN to 4,
-            com.google.zxing.EncodeHintType.CHARACTER_SET to "UTF-8",
-        ),
+    val matrix = QRCodeWriter().encode(
+        payload, BarcodeFormat.QR_CODE, 0, 0,
+        mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H, EncodeHintType.MARGIN to 4, EncodeHintType.CHARACTER_SET to "UTF-8"),
     )
     val scale = 1024 / matrix.width
     val side = matrix.width * scale
     val pixels = IntArray(side * side) { index ->
         if (matrix[(index % side) / scale, (index / side) / scale]) 0xFF111316.toInt() else 0xFFFFFFFF.toInt()
     }
-    val bitmap = android.graphics.Bitmap.createBitmap(pixels, side, side, android.graphics.Bitmap.Config.ARGB_8888)
-    val folder = java.io.File(cacheDir, "shared").apply { mkdirs() }
-    val file = java.io.File(folder, "cobro.png")
-    file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-    val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", file)
+    val bitmap = Bitmap.createBitmap(pixels, side, side, Bitmap.Config.ARGB_8888)
+    val folder = File(cacheDir, "shared").apply { mkdirs() }
+    val file = File(folder, "cobro.png")
+    file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
     val send = Intent(Intent.ACTION_SEND).setType("image/png")
         .putExtra(Intent.EXTRA_STREAM, uri)
         .putExtra(Intent.EXTRA_TEXT, caption)

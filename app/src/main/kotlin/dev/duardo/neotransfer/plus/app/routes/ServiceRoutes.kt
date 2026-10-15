@@ -130,7 +130,7 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
             },
             bill,
         )
-        current is Answer.Etecsa && kind == ServiceKind.Landline -> current.account.toPay
+        current is Answer.Etecsa && kind == ServiceKind.Landline -> current.account.toPay?.takeIf { it.signum() > 0 }
             ?.let { ServiceLookupUi.PhoneBill(current.owner, Money(it, currency)) }
             ?: ServiceLookupUi.Failed("No hay nada que pagar en este teléfono")
         current is Answer.Etecsa -> ServiceLookupUi.TopUp(
