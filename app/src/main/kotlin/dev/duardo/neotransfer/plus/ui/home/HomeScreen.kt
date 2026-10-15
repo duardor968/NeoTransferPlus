@@ -339,6 +339,7 @@ private fun CardSheet(state: CardSheetUi, actions: CardSheetActions) {
                 NeoGroup {
                     NeoRow(
                         card.numberLine,
+                        fitTitle = true,
                         supporting = listOfNotNull(card.currency, card.holder).joinToString(" · "),
                         trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", actions::copy) },
                     )

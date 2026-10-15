@@ -49,7 +49,7 @@ fun HomeRoute(plus: PlusApp) {
         else -> activity
     }
     val pending = remember(journal, history, cardUis, contacts) {
-        inProgress(journal, history.orEmpty().map { it.transactionUuid }.toSet(), cardUis, contacts.orEmpty())
+        inProgress(journal.orEmpty(), history.orEmpty().map { it.transactionUuid }.toSet(), cardUis, contacts.orEmpty())
     }
 
     var sheetCard by rememberSaveable { mutableStateOf<String?>(null) }

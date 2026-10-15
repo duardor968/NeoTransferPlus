@@ -105,7 +105,8 @@ private val OperationKind.person: Boolean
 /** People get initials with a direction badge; services, merchants and card lines get their glyph. */
 @Composable
 fun OperationAvatar(operation: OperationUi) {
-    if (operation.kind.person && operation.title.firstOrNull()?.isLetter() == true) {
+    // A card's bank record names no person, even for a credit.
+    if (operation.kind.person && operation.channel == null && operation.title.firstOrNull()?.isLetter() == true) {
         val badge = if (operation.kind.incoming) {
             AvatarBadge(Ds.drawable.ic_south_west, Neo.colors.accent, Neo.colors.onAccent)
         } else {

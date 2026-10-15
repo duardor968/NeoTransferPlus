@@ -95,7 +95,7 @@ private fun TicketHeader(operation: OperationUi) {
         val person = operation.kind in setOf(OperationKind.CardTransfer, OperationKind.AccountTransfer, OperationKind.Incoming)
         when {
             operation.status == OperationStatus.Confirmed && operation.kind != OperationKind.CardMovement -> ConfirmedMark(80.dp)
-            person && operation.title.firstOrNull()?.isLetter() == true -> NameAvatar(operation.title, size = 64.dp)
+            person && operation.channel == null && operation.title.firstOrNull()?.isLetter() == true -> NameAvatar(operation.title, size = 64.dp)
             else -> IconAvatar(operation.kind.icon, size = 64.dp)
         }
         Text(operation.title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)

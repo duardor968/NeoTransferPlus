@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.heading
@@ -68,7 +70,8 @@ fun Modifier.groupItem(index: Int, count: Int, color: Color): Modifier =
 /**
  * The single row of the system: leading slot (44 dp), title, optional supporting line, trailing slot.
  * Used by every list so spacing, ripple and alignment are identical everywhere. With [trailingBelowWhenLarge],
- * large font scales move the trailing element under the text so names keep the width.
+ * large font scales move the trailing element under the text so names keep the width. [fitTitle] keeps an
+ * identifier title on one line.
  */
 @Composable
 fun NeoRow(
@@ -81,6 +84,7 @@ fun NeoRow(
     titleColor: Color = Color.Unspecified,
     supportingContent: (@Composable () -> Unit)? = null,
     trailingBelowWhenLarge: Boolean = false,
+    fitTitle: Boolean = false,
 ) {
     val trailingBelow = trailingBelowWhenLarge && LocalDensity.current.fontScale >= 1.3f
     Row(
@@ -94,7 +98,10 @@ fun NeoRow(
     ) {
         leading?.invoke()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = titleColor)
+            val titleStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium)
+            // Identifiers (card numbers) stay on one line and step down in size instead of breaking mid-group.
+            if (fitTitle) FittedText(title, titleStyle, color = titleColor.takeOrElse { LocalContentColor.current }, minScale = 0.6f)
+            else Text(title, style = titleStyle, color = titleColor)
             when {
                 supportingContent != null -> supportingContent()
                 supporting != null -> Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -161,7 +161,7 @@ fun PasswordSettingsScreen(state: PasswordSettingsUi, actions: PasswordSettingsA
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
-            PasswordField(state.value, actions::value, if (state.saved) "Nueva contraseña de pago" else "Contraseña de pago de ENZONA", state.error)
+            PasswordField(state.value, actions::value, if (state.saved) "Nueva contraseña" else "Contraseña", state.error)
             if (state.saved) NeoGroup(Modifier.padding(top = NeoSpace.l)) {
                 NeoRow(
                     "Borrar la contraseña guardada",

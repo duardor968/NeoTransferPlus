@@ -62,7 +62,7 @@ class PlusApp(context: Context) {
     val wallet = repository.cards.stateIn(scope, SharingStarted.Eagerly, null)
     val account = repository.account.stateIn(scope, SharingStarted.Eagerly, null)
     val transactions = repository.transactions.stateIn(scope, SharingStarted.Eagerly, null)
-    val journal = repository.journal.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val journal = repository.journal.stateIn(scope, SharingStarted.Eagerly, null)
     val contactList = contacts.contacts.map { it.sortedByName() }.stateIn(scope, SharingStarted.Eagerly, null)
 
     // Lock -------------------------------------------------------------------------------------------------------

@@ -160,6 +160,7 @@ fun ContactDetailScreen(contact: ContactUi, actions: ContactActions, modifier: M
                         if (index > 0) GroupDivider()
                         NeoRow(
                             formatCardNumber(card.number),
+                            fitTitle = true,
                             supporting = listOfNotNull(card.bank, card.label).joinToString(" · ").ifEmpty { null },
                             leading = { IconAvatar(Ds.drawable.ic_credit_card) },
                             trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copy(card.number) }) },

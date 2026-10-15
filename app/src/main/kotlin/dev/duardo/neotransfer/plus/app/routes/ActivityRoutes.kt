@@ -55,7 +55,7 @@ fun ActivityRoute(plus: PlusApp) {
     val selectedCard = query.card?.takeIf { id -> cardUis.any { it.id == id } } ?: cardUis.firstOrNull()?.id
 
     val all = remember(transactions, journal, account, cardUis, contacts) {
-        transactions?.let { accountActivity(it, journal, account?.username, cardUis, contacts.orEmpty(), plus.zone) }
+        transactions?.let { accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone) }
     }
     val movements = remember(wallet, selectedCard) {
         wallet?.firstOrNull { it.card.fundingSourceUuid == selectedCard }?.movements(plus.zone)
@@ -133,7 +133,7 @@ fun rememberOperation(plus: PlusApp, key: String): OperationUi? {
         val (kind, rest) = key.substringBefore(':') to key.substringAfter(':')
         when (kind) {
             "tx" -> transactions?.firstOrNull { it.transactionUuid == rest }?.toUi(account?.username, cards, plus.zone)
-            "j" -> journal.firstOrNull { it.intent.id == rest }?.let { entry ->
+            "j" -> journal?.firstOrNull { it.intent.id == rest }?.let { entry ->
                 val history = entry.remoteId?.let { id -> transactions?.firstOrNull { it.transactionUuid == id } }
                 history?.toUi(account?.username, cards, plus.zone)
                     ?: entry.toUi(cards, contacts.orEmpty(), notices[rest], titles[rest], notSent[rest])
@@ -154,11 +154,17 @@ fun OperationRoute(plus: PlusApp, key: String) {
     val operation = rememberOperation(plus, key)
     val refresh by plus.refreshState.collectAsState()
     val transactions by plus.transactions.collectAsState()
+    val journal by plus.journal.collectAsState()
+    val wallet by plus.wallet.collectAsState()
     val clock = LocalClock.current
-    // Once the records are loaded, a movement that is not there anymore (signed out, cleared) closes its receipt.
-    LaunchedEffect(operation == null, transactions != null) {
-        if (operation == null && transactions != null) plus.nav.back()
+    val loaded = when (key.substringBefore(':')) {
+        "tx" -> transactions != null
+        "j" -> journal != null
+        else -> wallet != null
     }
+    // Once its record is loaded, a movement that is not there anymore (signed out, cleared) closes its receipt.
+    val gone = operation == null && loaded
+    LaunchedEffect(gone) { if (gone) plus.nav.back() }
     if (operation == null) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
         return

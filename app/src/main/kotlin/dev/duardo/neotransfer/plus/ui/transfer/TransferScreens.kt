@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.AmountDisplay
+import dev.duardo.neotransfer.plus.designsystem.component.FittedText
 import dev.duardo.neotransfer.plus.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.plus.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.plus.designsystem.component.KeypadKey
@@ -113,6 +114,7 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                     Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(0, count, Neo.colors.group)) {
                         NeoRow(
                             formatCardNumber(typed.number),
+                            fitTitle = true,
                             supporting = typed.bank ?: "Tarjeta nueva",
                             leading = { IconAvatar(Ds.drawable.ic_credit_card) },
                             onClick = actions::pickTyped,
@@ -148,11 +150,11 @@ private fun RecentChip(recipient: RecipientUi.Card, onClick: () -> Unit) {
     ) {
         val name = recipient.name
         if (name != null) NameAvatar(name, size = 52.dp) else IconAvatar(Ds.drawable.ic_credit_card, size = 52.dp)
-        Text(
+        FittedText(
             name?.substringBefore(' ') ?: "•••• ${recipient.card.number.takeLast(4)}",
-            style = MaterialTheme.typography.labelMedium,
+            MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            minScale = 0.6f,
         )
     }
 }
@@ -164,6 +166,7 @@ private fun ContactCardsSheet(contact: ContactUi, actions: RecipientActions) {
             contact.cards.forEach { card ->
                 NeoRow(
                     formatCardNumber(card.number),
+                    fitTitle = true,
                     supporting = listOfNotNull(card.bank, card.label).joinToString(" · ").ifEmpty { null },
                     leading = { IconAvatar(Ds.drawable.ic_credit_card) },
                     onClick = { actions.pickContactCard(contact.id, card.id) },

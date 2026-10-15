@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,7 +38,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ServicesRoute(plus: PlusApp) {
     val journal by plus.journal.collectAsState()
-    val recent = remember(journal) { recentReferences(journal) }
+    val recent = remember(journal) { recentReferences(journal.orEmpty()) }
     val actions = remember(plus) {
         object : ServicesActions {
             override fun open(kind: ServiceKind) = plus.nav.push(Dest.Service(kind))
@@ -77,7 +78,7 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
     val payment = remember(plus, authorizer) { Payment(plus, authorizer) }
     var reference by rememberSaveable { mutableStateOf(dest.reference) }
     var amount by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableStateOf(selected) }
+    var source by rememberSaveable { mutableIntStateOf(selected) }
     var bill by rememberSaveable { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }

@@ -101,7 +101,7 @@ fun ServicesScreen(state: ServicesUi, actions: ServicesActions, modifier: Modifi
                                 pair.forEach { tile ->
                                     val m = Modifier.weight(1f).fillMaxHeight()
                                     when (tile) {
-                                        is RecentReferenceUi -> ReferenceTile(tile, m) { actions.repeat(tile) }
+                                        is RecentReferenceUi -> ReferenceTile(tile, tile.kind.label.takeIf { kinds.size > 1 }, m) { actions.repeat(tile) }
                                         is ServiceKind -> NewPaymentTile(tile.startLabel(single = kinds.size == 1), tile.icon, m) { actions.open(tile) }
                                     }
                                 }
@@ -144,8 +144,9 @@ private fun NewPaymentTile(title: String, icon: Int, modifier: Modifier, onClick
     }
 }
 
+/** A reference paid before: the reference itself is the title; the service only where the group has several. */
 @Composable
-private fun ReferenceTile(reference: RecentReferenceUi, modifier: Modifier, onClick: () -> Unit) {
+private fun ReferenceTile(reference: RecentReferenceUi, kind: String?, modifier: Modifier, onClick: () -> Unit) {
     Column(
         modifier
             .heightIn(min = 96.dp)
@@ -157,9 +158,9 @@ private fun ReferenceTile(reference: RecentReferenceUi, modifier: Modifier, onCl
     ) {
         Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(NeoSpace.s))
-        Text(reference.kind.label, style = MaterialTheme.typography.titleSmall)
         // References are identifiers: one line, never split mid-number.
-        FittedText(reference.value, MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, minScale = 0.5f)
+        FittedText(reference.value.removeSuffix("@nauta.com.cu"), MaterialTheme.typography.titleSmall, minScale = 0.5f)
+        kind?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         reference.lastPaid?.let {
             Text(formatMoney(it.amount, it.currency), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -178,7 +179,7 @@ interface ServiceFormActions {
     fun pay()
 }
 
-/** Nauta accounts are typed without the domain; the suffix shows it until the user writes one. */
+/** Nauta accounts may be typed without their domain; ENZONA gets the full account. */
 val ServiceKind.domain: String? get() = if (this == ServiceKind.Nauta || this == ServiceKind.NautaHome) "@nauta.com.cu" else null
 
 /**
@@ -207,7 +208,6 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     },
                     imeAction = ImeAction.Search,
                     error = state.referenceError,
-                    suffix = state.kind.domain?.takeIf { '@' !in state.reference && state.reference.isNotEmpty() },
                 )
                 when (lookup) {
                     ServiceLookupUi.None -> Unit
@@ -272,7 +272,7 @@ private fun payLabel(state: ServiceFormUi): String {
 
 @Composable
 private fun Owner(name: String) {
-    NeoGroup { NeoRow(name, supporting = "Titular") }
+    NeoGroup { SummaryLines(listOf(SummaryLine("Titular", name))) }
 }
 
 @Composable

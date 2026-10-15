@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -132,7 +133,7 @@ fun RecipientRoute(plus: PlusApp) {
     val withCards = all.filter { it.cards.isNotEmpty() && it.matches(query) }.map(Contact::toUi)
     val state = RecipientPickUi(
         query, typed, typedError,
-        recent = if (query.isEmpty()) recentRecipients(journal, all) else emptyList(),
+        recent = if (query.isEmpty()) recentRecipients(journal.orEmpty(), all) else emptyList(),
         contacts = withCards,
         chooseCardOf = chooseCardOf?.let { id -> withCards.firstOrNull { it.id == id } ?: all.firstOrNull { it.id == id }?.toUi() },
     )
@@ -184,7 +185,7 @@ fun AmountRoute(plus: PlusApp, dest: Dest.Amount) {
     val loaded by plus.wallet.collectAsState()
     val selected by plus.selectedCard.collectAsState()
     var input by rememberSaveable { mutableStateOf(dest.amount?.stripTrailingZeros()?.toPlainString().orEmpty()) }
-    var source by rememberSaveable { mutableStateOf(selected) }
+    var source by rememberSaveable { mutableIntStateOf(selected) }
     val noCards = loaded?.isEmpty() == true
     LaunchedEffect(noCards) {
         if (noCards) {
@@ -259,7 +260,8 @@ fun ResultRoute(plus: PlusApp, intentId: String) {
             plus.nav.push(Dest.ContactEdit(null, Contact("new", "", listOf(ContactCard(java.util.UUID.randomUUID().toString(), number, null)), emptyList())))
         }
     }
-    BackHandler(operation.status != OperationStatus.Sending) { plus.nav.home() }
+    // The payment goes on by itself: back leaves the flow, it never returns to the review.
+    BackHandler { plus.nav.home() }
     PaymentResultScreen(PaymentResultUi(operation, canSave), actions)
 }
 
@@ -275,7 +277,7 @@ fun PayRoute(plus: PlusApp, code: String?) {
     var problem by remember { mutableStateOf<String?>(null) }
     var amount by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableStateOf(selected) }
+    var source by rememberSaveable { mutableIntStateOf(selected) }
 
     fun resolve(raw: String) {
         if (resolving) return

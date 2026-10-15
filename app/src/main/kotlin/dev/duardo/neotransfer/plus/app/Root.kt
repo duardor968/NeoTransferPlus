@@ -2,6 +2,7 @@ package dev.duardo.neotransfer.plus.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.os.CancellationSignal
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -19,6 +20,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,10 +31,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaLoginWeb
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionFailure
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
@@ -108,17 +111,24 @@ private fun FirstStartPermissions(plus: PlusApp) {
 @Composable
 private fun LockRoute(plus: PlusApp, gate: BiometricGate) {
     var state by remember { mutableStateOf<LockUi>(LockUi.Prompting) }
+    var prompt by remember { mutableStateOf<CancellationSignal?>(null) }
     val epoch by plus.lockEpoch.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    fun prompt() {
+    fun show() {
+        if (prompt != null) return
         state = LockUi.Prompting
-        gate.unlock("Desbloquear $AppName", onSuccess = plus::unlock, onCancelled = { state = LockUi.Cancelled })
+        prompt = gate.unlock(
+            "Desbloquear $AppName",
+            onSuccess = { prompt = null; plus.unlock() },
+            onCancelled = { prompt = null; state = LockUi.Cancelled },
+        )
     }
     LaunchedEffect(epoch) {
         lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
-        prompt()
+        show()
     }
-    LockScreen(state, ::prompt)
+    DisposableEffect(Unit) { onDispose { prompt?.cancel() } }
+    LockScreen(state, ::show)
 }
 
 // ---- Login --------------------------------------------------------------------------------------------------
@@ -139,20 +149,20 @@ private fun EnzonaSessionFailure.problem(): LoginProblem = when (this) {
 @Composable
 private fun LoginRoute(plus: PlusApp) {
     val session by plus.session.collectAsState()
-    var loading by remember { mutableStateOf(true) }
+    var pageLoading by remember { mutableStateOf(true) }
     var pageFailed by remember { mutableStateOf(false) }
     var web by remember { mutableStateOf<WebView?>(null) }
     val url = session.authorizationUrl
     val state = when {
         url != null && session.busy -> LoginUi.Connecting
-        url != null -> LoginUi.Web(loading)
+        url != null -> LoginUi.Web(pageLoading)
         else -> LoginUi.Start(if (pageFailed) LoginProblem.PageFailed else session.failure?.problem())
     }
     val actions = remember(plus) {
         object : LoginActions {
             override fun start() {
                 pageFailed = false
-                loading = true
+                pageLoading = true
                 plus.repository.beginLogin()
             }
             override fun close() = plus.repository.cancelLogin()
@@ -163,16 +173,17 @@ private fun LoginRoute(plus: PlusApp) {
         if (view != null && view.canGoBack() && !session.busy) view.goBack() else plus.repository.cancelLogin()
     }
     LoginScreen(state, actions, web = {
-        if (url != null) AndroidView(
+        if (url != null) key(url) { AndroidView(
             factory = { context ->
                 WebView(context).also { view ->
                     web = view
                     EnzonaLoginWeb.attach(view, url, object : EnzonaLoginWeb.Listener {
                         override fun onCallback(url: String) {
-                            plus.repository.acceptLoginCallback(url, isMainFrame = true)
+                            // A callback this attempt did not expect ends it: the person starts again.
+                            if (!plus.repository.acceptLoginCallback(url, isMainFrame = true)) plus.repository.cancelLogin()
                         }
-                        override fun onLoading(busy: Boolean) {
-                            loading = busy
+                        override fun onLoading(loading: Boolean) {
+                            pageLoading = loading
                         }
                         override fun onBlocked() {
                             pageFailed = true
@@ -186,6 +197,6 @@ private fun LoginRoute(plus: PlusApp) {
                 EnzonaLoginWeb.release(view)
             },
             modifier = Modifier.fillMaxSize(),
-        )
+        ) }
     })
 }

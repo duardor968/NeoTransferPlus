@@ -173,7 +173,7 @@ fun PasswordSheet(state: PasswordSheetUi, actions: PasswordSheetActions) {
     SecureWindow()
     NeoBottomSheet(onDismissRequest = actions::dismiss, title = "Contraseña de pago") {
         Column(Modifier.padding(horizontal = NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
-            PasswordField(state.value, actions::value, "Contraseña de pago de ENZONA", state.error)
+            PasswordField(state.value, actions::value, "Contraseña", state.error)
             NeoButton(state.action, actions::submit, icon = Ds.drawable.ic_fingerprint, enabled = state.value.isNotEmpty())
         }
     }
