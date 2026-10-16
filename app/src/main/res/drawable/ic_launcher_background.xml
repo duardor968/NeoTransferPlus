@@ -1,11 +1,3 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Royal blue of the textured N, lit from the top-left like the mark. -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="27" android:startY="0" android:endX="81" android:endY="108"
-                android:startColor="#FF3A72F0" android:endColor="#FF0E3CB4" />
-        </aapt:attr>
-    </path>
-</vector>
+<!-- Same dark ground as NeoTransfer's icon: only the colour of the N tells the two apps apart. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="#0E0F12"/></shape>

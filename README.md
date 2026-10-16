@@ -38,7 +38,7 @@ Entras con tu usuario de ENZONA en la página de acceso de ENZONA, dentro de la 
 
 Cada pago se envía una sola vez. Si la respuesta no llega, queda «Sin confirmar» y se comprueba en la actividad: la app nunca lo reenvía sola.
 
-La 0.1.0 es una versión temprana que sigue el contrato de la app oficial y lo comprueba con pruebas automáticas, pero todavía no se ha probado contra el servidor de ENZONA; si algo no sale como esperas, abre un [issue](https://github.com/duardor968/NeoTransferPlus/issues) sin datos personales.
+Es una versión temprana que sigue el contrato de la app oficial y lo comprueba con pruebas automáticas, pero todavía no se ha probado contra el servidor de ENZONA; si algo no sale como esperas, abre un [issue](https://github.com/duardor968/NeoTransferPlus/issues) sin datos personales.
 
 ## Requisitos
 
@@ -51,7 +51,7 @@ La 0.1.0 es una versión temprana que sigue el contrato de la app oficial y lo c
 
 NeoTransfer+ no está en Google Play: se instala desde GitHub.
 
-1. En el teléfono, abre la [última versión](https://github.com/duardor968/NeoTransferPlus/releases/latest) (la primera es la `v0.1.0`) y descarga el archivo `.apk`.
+1. En el teléfono, abre la [última versión](https://github.com/duardor968/NeoTransferPlus/releases/latest) y descarga el archivo `.apk`.
 2. Ábrelo. Android te pedirá permiso para instalar apps desde el navegador o el administrador de archivos: concédelo y toca «Instalar».
 
 Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus datos. Cada versión publica la suma SHA-256 del APK para que puedas comprobarlo.
