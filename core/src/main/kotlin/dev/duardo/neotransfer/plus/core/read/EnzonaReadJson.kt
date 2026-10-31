@@ -9,14 +9,20 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
+/**
+ * A reply whose shape the decoders do not accept. Its message names the field and the problem («Invalid amount
+ * decimal»), never a value, so it is safe to log.
+ */
+class EnzonaShapeException(message: String) : IllegalArgumentException(message)
+
 /** Offline decoders for the three AOT-traced read envelopes. No status implies business success. */
 object EnzonaReadJson {
     /** One retained history row, with the same envelope and field validation as a history page. */
     fun transaction(body: String): EnzonaTransaction = transaction(envelope(body))
 
     fun account(body: String): EnzonaAccount {
-        val row = envelope(body)["account"] as? JsonObject ?: throw IllegalArgumentException("Missing or invalid account")
-        require(row.isNotEmpty() && listOf("fault", "error", "errors").none { it in row }) { "ENZONA account error" }
+        val row = envelope(body)["account"] as? JsonObject ?: throw EnzonaShapeException("Missing or invalid account")
+        shape(row.isNotEmpty() && listOf("fault", "error", "errors").none { it in row }) { "ENZONA account error" }
         return EnzonaAccount(
             username = row.label("username"),
             uuid = row.label("uuid"),
@@ -34,7 +40,7 @@ object EnzonaReadJson {
 
     fun balance(body: String): EnzonaCardBalance {
         val root = envelope(body)
-        require("balance" in root || "balance_available" in root) { "Missing balance fields" }
+        shape("balance" in root || "balance_available" in root) { "Missing balance fields" }
         return EnzonaCardBalance(
             bookBalance = root.decimal("balance"),
             availableBalance = root.decimal("balance_available"),
@@ -54,7 +60,7 @@ object EnzonaReadJson {
     fun transactions(body: String): EnzonaTransactionPage {
         val root = envelope(body)
         val pagination = root["pagination"] as? JsonObject
-            ?: throw IllegalArgumentException("Missing or invalid pagination")
+            ?: throw EnzonaShapeException("Missing or invalid pagination")
         return EnzonaTransactionPage(
             transactions = root.rows("transaction").map(::transaction),
             pagination = EnzonaPagination(
@@ -104,7 +110,7 @@ object EnzonaReadJson {
     // TransactionModel.fromJson 0x6cb7dc. Repeated UUIDs remain repeated rows.
     private fun transaction(row: JsonObject) = EnzonaTransaction(
         transactionUuid = row.requiredId("transaction_uuid"),
-        owner = row.string("owner"),
+        owner = row.loose("owner"),
         clientId = row.text("client_id"),
         invoice = row.text("invoice"),
         invoiceNumber = row.text("invoice_number"),
@@ -166,37 +172,45 @@ object EnzonaReadJson {
             Json.parseToJsonElement(body)
         } catch (_: SerializationException) {
             // Serialization diagnostics can contain body text: do not retain them as a cause.
-            throw IllegalArgumentException("Invalid ENZONA JSON")
-        } as? JsonObject ?: throw IllegalArgumentException("Expected ENZONA object")
-        require(listOf("fault", "error", "errors").none { it in root }) { "ENZONA error envelope" }
+            throw EnzonaShapeException("Invalid ENZONA JSON")
+        } as? JsonObject ?: throw EnzonaShapeException("Expected ENZONA object")
+        shape(listOf("fault", "error", "errors").none { it in root }) { "ENZONA error envelope" }
         return root
+    }
+
+    private inline fun shape(accepted: Boolean, problem: () -> String) {
+        if (!accepted) throw EnzonaShapeException(problem())
     }
 
     private fun JsonObject.rows(key: String): List<JsonObject> {
         val array = this[key] as? JsonArray
-            ?: throw IllegalArgumentException("Missing or invalid $key list")
-        return array.map { it as? JsonObject ?: throw IllegalArgumentException("Invalid $key row") }
+            ?: throw EnzonaShapeException("Missing or invalid $key list")
+        return array.map { it as? JsonObject ?: throw EnzonaShapeException("Invalid $key row") }
     }
 
     private fun JsonObject.requiredId(key: String): String {
         val value = string(key)
-        require(!value.isNullOrBlank()) { "Missing or invalid $key" }
+        if (value.isNullOrBlank()) throw EnzonaShapeException("Missing or invalid $key")
         return value
     }
 
     private fun JsonObject.primitive(key: String): JsonPrimitive? {
         val value = this[key]
         if (value == null || value == JsonNull) return null
-        return value as? JsonPrimitive ?: throw IllegalArgumentException("Invalid $key type")
+        return value as? JsonPrimitive ?: throw EnzonaShapeException("Invalid $key type: not a value")
     }
 
     private fun JsonObject.string(key: String): String? {
         val value = primitive(key) ?: return null
-        require(value.isString) { "Invalid $key type" }
+        shape(value.isString) { "Invalid $key type: not text" }
         return value.content
     }
 
     private fun JsonObject.text(key: String): String? = primitive(key)?.content
+
+    /** A field the app does not read: its value when it is one, absent in any other shape; [EnzonaTransaction.original] keeps it. */
+    private fun JsonObject.loose(key: String): String? =
+        (this[key] as? JsonPrimitive)?.takeUnless { it == JsonNull || !it.isString && it.content == "false" }?.content
 
     /** Descriptive account text: a JSON boolean (the provider's "not applicable" marker) or blank is absent. */
     private fun JsonObject.label(key: String): String? = primitive(key)
@@ -205,7 +219,7 @@ object EnzonaReadJson {
     private fun JsonObject.date(key: String): EnzonaRemoteDate? = string(key)?.let(::EnzonaRemoteDate)
 
     private fun JsonObject.currency(): String? = string("currency")?.also {
-        require(it.isNotBlank() && it.none(Char::isISOControl)) { "Invalid currency value" }
+        shape(it.isNotBlank() && it.none(Char::isISOControl)) { "Invalid currency value" }
     }
 
     private fun JsonObject.decimal(key: String): BigDecimal? {
@@ -215,28 +229,28 @@ object EnzonaReadJson {
         return try {
             BigDecimal(value.content)
         } catch (_: NumberFormatException) {
-            throw IllegalArgumentException("Invalid $key decimal")
+            throw EnzonaShapeException("Invalid $key decimal")
         }
     }
 
     private fun JsonObject.long(key: String, allowString: Boolean = true): Long? {
         val value = primitive(key) ?: return null
-        require(allowString || !value.isString) { "Invalid $key type" }
-        return value.content.toLongOrNull() ?: throw IllegalArgumentException("Invalid $key integer")
+        shape(allowString || !value.isString) { "Invalid $key type: text, not a number" }
+        return value.content.toLongOrNull() ?: throw EnzonaShapeException("Invalid $key integer")
     }
 
     private fun JsonObject.int(key: String): Int? = long(key)?.let {
-        require(it in Int.MIN_VALUE..Int.MAX_VALUE) { "Invalid $key integer" }
+        shape(it in Int.MIN_VALUE..Int.MAX_VALUE) { "Invalid $key integer" }
         it.toInt()
     }
 
     private fun JsonObject.boolean(key: String): Boolean? = primitive(key)?.let {
-        it.content.toBooleanStrictOrNull() ?: throw IllegalArgumentException("Invalid $key boolean")
+        it.content.toBooleanStrictOrNull() ?: throw EnzonaShapeException("Invalid $key boolean")
     }
 
     private fun JsonObject.optionalObject(key: String): JsonObject? {
         val value = this[key]
         if (value == null || value == JsonNull || value == JsonPrimitive(false)) return null
-        return value as? JsonObject ?: throw IllegalArgumentException("Invalid $key object")
+        return value as? JsonObject ?: throw EnzonaShapeException("Invalid $key object")
     }
 }

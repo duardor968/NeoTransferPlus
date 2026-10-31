@@ -105,6 +105,15 @@ class EnzonaApisTest {
         assertEquals("05-issued-by-fixture", result.code)
     }
 
+    @Test fun ownQrWithoutAmountLeavesTheKeyOut() = runBlocking {
+        var seen: Request? = null
+        val api = EnzonaQrApi({ seen = it; EnzonaHttpReply(200, "{\"vendor_identity_code\":\"05-issued-by-fixture\"}") })
+        val result = api.createOwn(tokens, owner, null, "CUP")
+        val json = Json.parseToJsonElement(seen!!.bodyText()!!).jsonObject
+        assertEquals(setOf("currency", "description"), json.keys)
+        assertNull(result.amount)
+    }
+
     @Test fun qrOwnerMismatchUnrelatedDataAndHttpErrorsNeverReachOrRepeatTheTransport() = runBlocking {
         var calls = 0
         val silent = EnzonaQrApi({ calls++; error("must not send") })
@@ -158,7 +167,7 @@ class EnzonaApisTest {
     private val requests = EnzonaPaymentRequests(EnzonaCipher(
         KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair().public as RSAPublicKey))
     private fun transfer() = requests.encode(EnzonaAccountTransferDraft("card", "recipient-uuid", "recipient-user",
-        BigDecimal("1.00"), "CUP"), charArrayOf('t'))
+        BigDecimal("1.00"), "CUP"), "135790".toCharArray())
 
     @Test fun paymentSendsOneTracedPostWithSessionHeaders() = runBlocking {
         var sends = 0
@@ -195,11 +204,43 @@ class EnzonaApisTest {
         assertFailsWith<SocketTimeoutException> { timeout.submit(tokens, transfer()) }
         assertEquals(1, sends)
         val invoice = requests.encode(EnzonaInvoicePaymentDraft(EnzonaInvoiceService.NAUTA, "n@nauta.com.cu", "n@nauta.com.cu",
-            "card", BigDecimal.TEN, "CUP"), charArrayOf('t'))
+            "card", BigDecimal.TEN, "CUP"), "135790".toCharArray())
         val api = EnzonaPaymentApi({ outgoing ->
             assertEquals("https://api.enzona.net/invoice/v1.0.0/invoice/payment", outgoing.url.toString())
             EnzonaHttpReply(200, """{"charged_invoice":{"status":"Fallida"}}""")
         })
         assertEquals(EnzonaIntentState.REJECTED, api.submit(tokens, invoice).state)
+    }
+
+    @Test fun cardChangesGoThroughTheTransportWithTheTracedRoutesAndRemovalCarriesNoBody() = runBlocking<Unit> {
+        val requests = mutableListOf<Request>()
+        val client = enzonaHttpClient().newBuilder().addInterceptor { chain ->
+            val request = chain.request().also(requests::add)
+            val json = if (request.url.encodedPath.endsWith("/coordinates")) """{"coordinates":{"C1":"A02","C2":"D05","P1":"2","P2":"4"}}""" else ""
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(json.toResponseBody()).build()
+        }.build()
+        EnzonaHttp(EnzonaTransport(client)).use { http ->
+            val api = EnzonaCardsApi(http::execute)
+            assertEquals(listOf("A02", "D05", "2", "4"), api.coordinates(tokens).labels)
+            api.setDefault(tokens, "synthetic-card-uuid")
+            api.remove(tokens, "synthetic-card-uuid")
+        }
+        assertEquals("GET", requests[0].method)
+        assertEquals("https://api.enzona.net/nomenclator/v1.0.0/nomenclator/coordinates", requests[0].url.toString())
+        assertEquals("POST", requests[1].method)
+        assertEquals("https://api.enzona.net/cards/v1.0.0/cards/default", requests[1].url.toString())
+        assertEquals("application/json; charset=utf-8", requests[1].body?.contentType().toString())
+        assertEquals("""{"funding_source_uuid":"synthetic-card-uuid"}""", requests[1].bodyText())
+        assertEquals("DELETE", requests[2].method)
+        assertEquals("https://api.enzona.net/cards/v1.0.0/cards/synthetic-card-uuid/delete", requests[2].url.toString())
+        assertNull(requests[2].body)
+        requests.forEach { request ->
+            assertEquals("Bearer SYNTHETIC_ACCESS", request.header("Authorization"))
+            assertEquals("1.9.11.241103", request.header("Version"))
+        }
+        val rejected = EnzonaCardsApi({ EnzonaHttpReply(401, """{"fault":{"code":900901,"description":"Invalid Credentials"}}""") })
+        assertTrue(assertFailsWith<EnzonaApiException> { rejected.banks(tokens) }.invalidCredentials)
+        assertTrue(assertFailsWith<EnzonaApiException> { rejected.remove(tokens, "synthetic-card-uuid") }.invalidCredentials)
+        assertFailsWith<IllegalArgumentException> { EnzonaCardsApi({ error("not sent") }).remove(tokens, "..") }
     }
 }

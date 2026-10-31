@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -66,12 +67,27 @@ data class EnzonaIntent(
     override fun toString(): String = "EnzonaIntent(redacted)"
 }
 
-/** One local money attempt. [remoteId] is only an observed `transaction_uuid`, never an invoice uuid. */
+/** How ENZONA's history settled an unconfirmed attempt: its exact `transaction_uuid`, or one row of the same amount and time. */
+enum class EnzonaHistoryMatch { UUID, AMOUNT_AND_TIME }
+
+/**
+ * One local money attempt. [remoteId] is only an observed `transaction_uuid` (also from a reply that proved nothing),
+ * never an invoice uuid. [httpStatus]: ENZONA's reply, 0 when none arrived, null when the app did not keep it yet.
+ * [faultCode] and [faultText]: what ENZONA's `fault` said, sanitized. [matchedBy]: how the history settled it.
+ * [notFoundAt]: the last history read that covered its time and had no row for it. [markedNotDoneAt]: the person
+ * marked it as not done, a resolution of their own and never REJECTED; a history row for it undoes the mark.
+ */
 @Entity(tableName = "intent_journal", primaryKeys = ["id"], indices = [Index("ownerSubject")])
 data class EnzonaJournalEntry(
     @Embedded val intent: EnzonaIntent,
     val state: EnzonaIntentState = EnzonaIntentState.PREPARED,
     val remoteId: String? = null,
+    val httpStatus: Int? = null,
+    val faultCode: String? = null,
+    val faultText: String? = null,
+    val matchedBy: EnzonaHistoryMatch? = null,
+    val notFoundAt: Long? = null,
+    val markedNotDoneAt: Long? = null,
 ) {
     override fun toString(): String = "EnzonaJournalEntry(state=$state, privateFields=redacted)"
 }
@@ -81,7 +97,15 @@ internal interface EnzonaPaymentJournal {
     suspend fun intent(owner: String, id: String): EnzonaJournalEntry?
     /** Compare-and-set PREPARED → SUBMITTING. A winning CAS grants exactly one dispatch, ever. */
     suspend fun tryBeginSubmission(owner: String, id: String): Boolean
-    suspend fun markTimedOut(owner: String, id: String): Boolean
+    /**
+     * SUBMITTING → UNKNOWN; true when this call made it. On SUBMITTING or UNKNOWN it also keeps what a reply that proved
+     * nothing said ([evidence]): its `transaction_uuid` (never replacing one), its HTTP status (0 without a reply) and its fault.
+     */
+    suspend fun markUnknown(owner: String, id: String, evidence: EnzonaPaymentEvidence? = null): Boolean
+    /** SUBMITTING, or UNKNOWN without any reply kept, → NOT_DELIVERED: the body never left the phone. */
+    suspend fun markNotDelivered(owner: String, id: String): Boolean
+    /** At process start no flight is alive: every SUBMITTING attempt becomes UNKNOWN. Returns how many. */
+    suspend fun abandonFlights(): Int
     suspend fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?): Boolean
 }
 
@@ -93,7 +117,7 @@ enum class EnzonaPaymentNotice {
     TIMEOUT,
     /** The reply did not prove acceptance or rejection: "Sin confirmar". */
     UNCONFIRMED,
-    /** Approval expired after the CAS: nothing was sent, and this attempt cannot be sent anymore. */
+    /** Approval expired after the CAS: NOT_DELIVERED, nothing was sent, and this attempt cannot be sent anymore. */
     NOT_SENT_AUTHORIZATION_EXPIRED,
     /** A terminal reply conflicted with the stored result. */
     NEEDS_REVIEW,
@@ -115,7 +139,9 @@ class EnzonaPaymentUpdate internal constructor(
     override fun toString() = "EnzonaPaymentUpdate(state=$state, late=$late, notice=$notice, privateFields=redacted)"
 }
 
-class EnzonaPaymentPreparationException internal constructor() : IllegalStateException("No se pudo preparar el pago de ENZONA")
+/** Nothing was sent. [session] says why the session could not be used; null when this phone failed to prepare it. */
+class EnzonaPaymentPreparationException internal constructor(val session: EnzonaSessionFailure? = null) :
+    IllegalStateException("No se pudo preparar el pago de ENZONA")
 class EnzonaPaymentAuthorizationExpiredException internal constructor() : CancellationException("La autorización del pago ha caducado")
 
 /**
@@ -134,6 +160,13 @@ internal class EnzonaPaymentCoordinator(
 ) : AutoCloseable {
     init { require(responseWaitMillis > 0) }
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    // A flight lives only in the process that sent it: what an earlier process left SUBMITTING is unconfirmed.
+    private val abandoned = scope.launch {
+        try {
+            journal.abandonFlights().takeIf { it > 0 }?.let { EnzonaLog.warn("payments in flight at start: $it marked UNKNOWN") }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { EnzonaLog.warn("payments in flight not recovered: error=${EnzonaLog.error(failure)}") }
+    }
     private val mutableUpdates = MutableSharedFlow<EnzonaPaymentUpdate>(extraBufferCapacity = 16)
     /** Room is authoritative for persisted state. Unresolved late evidence is transient only. */
     val updates: SharedFlow<EnzonaPaymentUpdate> = mutableUpdates.asSharedFlow()
@@ -161,7 +194,10 @@ internal class EnzonaPaymentCoordinator(
         try {
             return journal.prepareIntent(intent).also { check(it.intent == intent) }.intent
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { throw EnzonaPaymentPreparationException() }
+        catch (failure: Exception) {
+            EnzonaLog.warn("payment not prepared: ${endpoint(type)} error=${EnzonaLog.error(failure)}")
+            throw EnzonaPaymentPreparationException()
+        }
     }
 
     /**
@@ -183,9 +219,13 @@ internal class EnzonaPaymentCoordinator(
             request = withContext(dispatcher) { encoder().encode(intent.draft(), password) }
             currentCoroutineContext().ensureActive()
             check(scope.isActive)
-            if (!canDispatch()) throw EnzonaPaymentAuthorizationExpiredException()
+            if (!canDispatch()) authorizationExpired()
         } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { throw EnzonaPaymentPreparationException() }
+        catch (failure: Exception) {
+            val session = (failure as? EnzonaSessionUnavailableException)?.failure
+            EnzonaLog.warn("payment not sent: ${endpoint(intent.type)} session=${session ?: "-"} error=${EnzonaLog.error(failure)}")
+            throw EnzonaPaymentPreparationException(session)
+        }
         finally { password.fill('\u0000') }
 
         val decision = CompletableDeferred<Unit>()
@@ -196,7 +236,8 @@ internal class EnzonaPaymentCoordinator(
             try {
                 // Once the database grants this dispatch it must never become eligible again.
                 val allowed = withContext(NonCancellable) {
-                    if (!scope.isActive || !canDispatch()) throw EnzonaPaymentAuthorizationExpiredException()
+                    abandoned.join()
+                    if (!scope.isActive || !canDispatch()) authorizationExpired()
                     journal.tryBeginSubmission(intent.ownerSubject, intent.id)
                 }
                 won.set(allowed)
@@ -206,8 +247,7 @@ internal class EnzonaPaymentCoordinator(
                 currentCoroutineContext().ensureActive()
                 // Room may have waited for a lock while authorization, owner or foreground changed.
                 if (!canDispatch()) return@async withContext(NonCancellable) {
-                    uncertain(intent, EnzonaPaymentNotice.NOT_SENT_AUTHORIZATION_EXPIRED, late = late.get())
-                        .also(mutableUpdates::tryEmit)
+                    notDelivered(intent, EnzonaPaymentNotice.NOT_SENT_AUTHORIZATION_EXPIRED, late.get()).also(mutableUpdates::tryEmit)
                 }
                 val evidence = network.submit(tokens, request)
                 observed = evidence
@@ -226,11 +266,14 @@ internal class EnzonaPaymentCoordinator(
                 }
                 throw cancelled
             } catch (failure: Exception) {
+                EnzonaLog.warn("payment ${if (won.get()) "request" else "reservation"} failed: ${endpoint(intent.type)} " +
+                    "error=${EnzonaLog.error(failure)}")
                 if (!won.get()) throw EnzonaPaymentPreparationException()
                 withContext(NonCancellable) {
-                    uncertain(intent, if (failure is InterruptedIOException) EnzonaPaymentNotice.TIMEOUT
-                        else EnzonaPaymentNotice.UNCONFIRMED, observed, late.get()).also(mutableUpdates::tryEmit)
-                }
+                    if (failure is EnzonaNotDeliveredException) notDelivered(intent, null, late.get())
+                    else uncertain(intent, if (failure is InterruptedIOException) EnzonaPaymentNotice.TIMEOUT
+                        else EnzonaPaymentNotice.UNCONFIRMED, observed, late.get())
+                }.also(mutableUpdates::tryEmit)
             } finally { decision.complete(Unit) }
         }
         flight.invokeOnCompletion { decision.complete(Unit) }
@@ -256,30 +299,65 @@ internal class EnzonaPaymentCoordinator(
     private suspend fun uncertain(intent: EnzonaIntent, notice: EnzonaPaymentNotice, evidence: EnzonaPaymentEvidence? = null,
         late: Boolean = false): EnzonaPaymentUpdate {
         return try {
-            journal.markTimedOut(intent.ownerSubject, intent.id)
+            journal.markUnknown(intent.ownerSubject, intent.id, evidence)
             val entry = requireNotNull(journal.intent(intent.ownerSubject, intent.id))
             update(entry, true, if (entry.state == EnzonaIntentState.UNKNOWN) notice else null, evidence, late)
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
             // A database failure does not prove that the server rejected a dispatched operation.
+            EnzonaLog.warn("payment result not saved: ${endpoint(intent.type)} error=${EnzonaLog.error(failure)}")
             EnzonaPaymentUpdate(intent.ownerSubject, intent.id, EnzonaIntentState.UNKNOWN, true,
                 EnzonaPaymentNotice.NOT_SAVED, evidence, late)
         }
     }
 
-    private fun update(entry: EnzonaJournalEntry, started: Boolean, notice: EnzonaPaymentNotice? = null,
-        evidence: EnzonaPaymentEvidence? = null, late: Boolean = false) =
-        EnzonaPaymentUpdate(entry.intent.ownerSubject, entry.intent.id, entry.state, started, notice, evidence, late)
+    /** The CAS was won but the body never left the phone: no money moved. */
+    private suspend fun notDelivered(intent: EnzonaIntent, notice: EnzonaPaymentNotice?, late: Boolean): EnzonaPaymentUpdate =
+        try {
+            journal.markNotDelivered(intent.ownerSubject, intent.id)
+            val entry = requireNotNull(journal.intent(intent.ownerSubject, intent.id))
+            update(entry, true, notice.takeIf { entry.state == EnzonaIntentState.NOT_DELIVERED }, null, late)
+        } catch (failure: Exception) {
+            EnzonaLog.warn("payment result not saved: ${endpoint(intent.type)} error=${EnzonaLog.error(failure)}")
+            EnzonaPaymentUpdate(intent.ownerSubject, intent.id, EnzonaIntentState.UNKNOWN, true,
+                EnzonaPaymentNotice.NOT_SAVED, null, late)
+        }
 
-    private fun EnzonaIntent.draft(): EnzonaPaymentDraft = when (type) {
-        EnzonaIntentType.CARD_TRANSFER -> EnzonaCardTransferDraft(cardUuid, destination.value, amount.toBigDecimal(), currency, description, phone.orEmpty())
-        EnzonaIntentType.ACCOUNT_TRANSFER -> EnzonaAccountTransferDraft(cardUuid, destination.value, requireNotNull(destination.username), amount.toBigDecimal(), currency, description)
-        EnzonaIntentType.QR_MERCHANT_PAYMENT -> EnzonaQrMerchantPaymentDraft(cardUuid, destination.value, amount.toBigDecimal(), currency, description, phone.orEmpty())
-        EnzonaIntentType.INVOICE_PAYMENT -> EnzonaInvoicePaymentDraft(
-            EnzonaInvoiceService.valueOf(requireNotNull(invoiceService)), destination.value, requireNotNull(invoiceOwner),
-            cardUuid, amount.toBigDecimal(), currency, description, invoiceFolio, invoiceRoute, invoicePeriod)
+    /**
+     * Every outcome other than a clean confirmation is logged: state, notice, HTTP status, ENZONA's status code and the
+     * names of the members its fault carried, never their values.
+     */
+    private fun update(entry: EnzonaJournalEntry, started: Boolean, notice: EnzonaPaymentNotice? = null,
+        evidence: EnzonaPaymentEvidence? = null, late: Boolean = false): EnzonaPaymentUpdate {
+        if (entry.state != EnzonaIntentState.CONFIRMED || notice != null) EnzonaLog.warn("payment ${entry.state}: " +
+            "${endpoint(entry.intent.type)} notice=${notice ?: "-"} http=${evidence?.httpStatus ?: "-"} " +
+            "status_code=${evidence?.statusCode ?: "-"}${evidence?.fault?.let { " fault=${it.fields.joinToString(",")}" } ?: ""} " +
+            "sent=$started late=$late")
+        return EnzonaPaymentUpdate(entry.intent.ownerSubject, entry.intent.id, entry.state, started, notice, evidence, late)
+    }
+
+    private fun authorizationExpired(): Nothing {
+        EnzonaLog.warn("payment not sent: authorization expired")
+        throw EnzonaPaymentAuthorizationExpiredException()
+    }
+
+    private fun endpoint(type: EnzonaIntentType) = "POST " + when (type) {
+        EnzonaIntentType.CARD_TRANSFER -> EnzonaPaymentRequest.CARD
+        EnzonaIntentType.ACCOUNT_TRANSFER -> EnzonaPaymentRequest.ACCOUNT
+        EnzonaIntentType.QR_MERCHANT_PAYMENT -> EnzonaPaymentRequest.MERCHANT
+        EnzonaIntentType.INVOICE_PAYMENT -> EnzonaPaymentRequest.INVOICE
     }
 
     override fun close() { scope.cancel() }
+}
+
+/** The reviewed values of [this], as the draft they were prepared from. */
+internal fun EnzonaIntent.draft(): EnzonaPaymentDraft = when (type) {
+    EnzonaIntentType.CARD_TRANSFER -> EnzonaCardTransferDraft(cardUuid, destination.value, amount.toBigDecimal(), currency, description, phone.orEmpty())
+    EnzonaIntentType.ACCOUNT_TRANSFER -> EnzonaAccountTransferDraft(cardUuid, destination.value, requireNotNull(destination.username), amount.toBigDecimal(), currency, description)
+    EnzonaIntentType.QR_MERCHANT_PAYMENT -> EnzonaQrMerchantPaymentDraft(cardUuid, destination.value, amount.toBigDecimal(), currency, description, phone.orEmpty())
+    EnzonaIntentType.INVOICE_PAYMENT -> EnzonaInvoicePaymentDraft(
+        EnzonaInvoiceService.valueOf(requireNotNull(invoiceService)), destination.value, requireNotNull(invoiceOwner),
+        cardUuid, amount.toBigDecimal(), currency, description, invoiceFolio, invoiceRoute, invoicePeriod)
 }
 
 /**

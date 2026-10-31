@@ -75,7 +75,10 @@ internal abstract class ContactsDatabase : RoomDatabase() {
     }
 }
 
-/** The local agenda. Saving replaces a contact's cards and phones as a whole, in one transaction. */
+/**
+ * What the app keeps of people: contacts kept only in the app, and the cards of people in the phone's address book
+ * ([Directory]). Saving replaces a contact's cards and phones as a whole, in one transaction.
+ */
 class ContactsStore internal constructor(private val database: ContactsDatabase) {
     private val dao = database.contacts()
 
@@ -92,13 +95,23 @@ class ContactsStore internal constructor(private val database: ContactsDatabase)
     suspend fun save(contact: Contact) {
         require(contact.name.isNotBlank())
         require(contact.cards.all { card -> card.pan.length == 16 && card.pan.all { it in '0'..'9' } })
+        database.withTransaction { write(contact) }
+    }
+
+    /** Removes [delete] and then saves [save], in one transaction: cards moved between contacts keep their ids. */
+    suspend fun relink(save: List<Contact>, delete: List<String>) {
         database.withTransaction {
-            dao.putContact(ContactRow(contact.id, contact.name.trim()))
-            dao.deleteCards(contact.id)
-            dao.deletePhones(contact.id)
-            dao.putCards(contact.cards.mapIndexed { index, card -> ContactCardRow(card.id, contact.id, card.pan, card.label?.trim()?.ifEmpty { null }, index) })
-            dao.putPhones(contact.phones.mapIndexed { index, phone -> ContactPhoneRow("${contact.id}:$index", contact.id, phone, index) })
+            delete.forEach { dao.delete(it) }
+            save.forEach { write(it) }
         }
+    }
+
+    private fun write(contact: Contact) {
+        dao.putContact(ContactRow(contact.id, contact.name.trim()))
+        dao.deleteCards(contact.id)
+        dao.deletePhones(contact.id)
+        dao.putCards(contact.cards.mapIndexed { index, card -> ContactCardRow(card.id, contact.id, card.pan, card.label?.trim()?.ifEmpty { null }, index) })
+        dao.putPhones(contact.phones.mapIndexed { index, phone -> ContactPhoneRow("${contact.id}:$index", contact.id, phone, index) })
     }
 
     suspend fun delete(id: String) {

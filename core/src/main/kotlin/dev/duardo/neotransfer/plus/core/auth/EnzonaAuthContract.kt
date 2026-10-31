@@ -27,10 +27,11 @@ object EnzonaAuthContract {
     private const val IDENTITY = "https://identity.enzona.net"
     private const val FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 
-    fun newAttempt(random: SecureRandom = SecureRandom()): LoginAttempt {
+    /** [loginHint]: the account's email, OAuth's `login_hint`; ENZONA's page decides whether it fills it in. */
+    fun newAttempt(random: SecureRandom = SecureRandom(), loginHint: String? = null): LoginAttempt {
         val verifier = randomValue(random)
         val state = randomValue(random)
-        return LoginAttempt(verifier, state)
+        return LoginAttempt(verifier, state, loginHint?.trim()?.takeIf(::isOpaque))
     }
 
     /** Only the exact callback origin and empty/root path, never a prefix match. */
@@ -59,10 +60,11 @@ object EnzonaAuthContract {
     class LoginAttempt internal constructor(
         private val verifier: String,
         private val state: String,
+        loginHint: String?,
     ) {
         private var consumed = false
 
-        val authorizationUri: URI = URI("$IDENTITY/oauth2/authorize?" + form(
+        val authorizationUri: URI = URI("$IDENTITY/oauth2/authorize?" + form(*listOfNotNull(
             "response_type" to "code",
             "client_id" to CLIENT_ID,
             "scope" to "openid",
@@ -70,7 +72,8 @@ object EnzonaAuthContract {
             "code_challange" to base64Url(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))),
             "code_challange_method" to "S256",
             "state" to state,
-        ))
+            loginHint?.let { "login_hint" to it },
+        ).toTypedArray()))
 
         /**
          * At most one successful exchange, including concurrent WebView callbacks.

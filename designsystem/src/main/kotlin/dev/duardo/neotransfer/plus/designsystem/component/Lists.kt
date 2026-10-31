@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -31,14 +32,16 @@ import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 
-/** Rows that belong together on one rounded surface. Dividers are inset to the text column. */
+/** Rows that belong together on one rounded, rimmed surface. Dividers are inset to the text column. */
 @Composable
 fun NeoGroup(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(NeoRadius.group)
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(NeoRadius.group))
-            .background(Neo.colors.group),
+            .clip(shape)
+            .background(Neo.colors.group)
+            .rim(shape),
         content = content,
     )
 }
@@ -63,9 +66,12 @@ fun groupItemShape(index: Int, count: Int): Shape {
     }
 }
 
-/** Background of item [index] of [count] in a group built inside a lazy list; pass `Neo.colors.group`. */
-fun Modifier.groupItem(index: Int, count: Int, color: Color): Modifier =
-    clip(groupItemShape(index, count)).background(color)
+/** Surface of item [index] of [count] in a group built inside a lazy list: one [NeoGroup] cut in rows. */
+@Composable
+fun Modifier.groupItem(index: Int, count: Int): Modifier {
+    val shape = groupItemShape(index, count)
+    return clip(shape).background(Neo.colors.group).itemRim(index, count)
+}
 
 /**
  * The single row of the system: leading slot (44 dp), title, optional supporting line, trailing slot.
@@ -104,13 +110,22 @@ fun NeoRow(
             else Text(title, style = titleStyle, color = titleColor)
             when {
                 supportingContent != null -> supportingContent()
-                supporting != null -> Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                supporting != null -> SeparatedText(supporting, MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (trailingBelow) trailing?.invoke()
         }
         if (!trailingBelow) trailing?.invoke()
     }
 }
+
+/**
+ * For an icon or text button that closes a row or a header: moves it by its own inner padding so the glyph, not the
+ * touch target, lines up with the edge the text of the other rows ends on.
+ */
+fun Modifier.flushEnd(): Modifier = offset(x = 12.dp)
+
+/** For text buttons that open a block: moves them by their own inner padding so the glyph lines up with the fields above. */
+fun Modifier.flushStart(): Modifier = offset(x = (-12).dp)
 
 /** Title above a group, aligned with the group's edge; optional action on the right. */
 @Composable
@@ -124,6 +139,6 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? 
             Modifier.weight(1f).semantics { heading() },
             style = MaterialTheme.typography.titleMedium,
         )
-        if (action != null && onAction != null) NeoTextButton(action, onAction)
+        if (action != null && onAction != null) NeoTextButton(action, onAction, Modifier.flushEnd())
     }
 }

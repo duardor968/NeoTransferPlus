@@ -3,6 +3,7 @@ package dev.duardo.neotransfer.plus.data.enzona
 import dev.duardo.neotransfer.plus.core.auth.EnzonaAuthContract
 import dev.duardo.neotransfer.plus.core.auth.EnzonaTokens
 import dev.duardo.neotransfer.plus.core.read.EnzonaAccount
+import java.io.InterruptedIOException
 import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -39,10 +40,14 @@ enum class EnzonaSessionFailure {
     ACCESS_DENIED,
     /** ENZONA answered with another error (`server_error`, `temporarily_unavailable`, an HTTP error, a reply off contract). */
     SERVER_ERROR,
-    /** Network or timeout; the saved session is kept. */
+    /** ENZONA did not answer in time; the saved session is kept. */
+    TIMEOUT,
+    /** No connection to ENZONA; the saved session is kept. */
     UNAVAILABLE,
     /** Local sign-out could not erase the stored session. */
     LOCAL_CLEAR_FAILED,
+    /** A new or renewed session could not be stored on this phone; the connection was fine. */
+    LOCAL_SAVE_FAILED,
 }
 
 data class EnzonaSessionState(
@@ -92,6 +97,8 @@ class EnzonaSession internal constructor(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /** Receives the account read during login, after the session is committed. Failures are ignored. */
     private val onAccount: suspend (owner: String, account: EnzonaFetched<EnzonaAccount>) -> Unit = { _, _ -> },
+    /** The email offered to ENZONA's sign-in page, if the app knows it. */
+    private val loginHint: () -> String? = { null },
 ) : AutoCloseable {
     private val lock = Any()
     private val storageMutex = Mutex()
@@ -121,7 +128,13 @@ class EnzonaSession internal constructor(
                 var failure: EnzonaSessionFailure? = null
                 val saved = try { persistence.load() }
                 catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { failure = EnzonaSessionFailure.RESTORE_FAILED; null }
+                catch (error: Exception) {
+                    EnzonaLog.warn("session lost: reason=restore_failed error=${EnzonaLog.error(error)} (saved file kept)")
+                    failure = EnzonaSessionFailure.RESTORE_FAILED
+                    null
+                }
+                if (failure == null) EnzonaLog.info(if (saved == null) "session restore: none saved" else
+                    "session restore: saved ${EnzonaLog.access(saved, nowEpochSeconds())} refresh_token=${if (saved.refreshToken != null) "yes" else "no"}")
                 synchronized(lock) {
                     restored = true
                     // A login, refresh or sign-out that completed meanwhile already defines the session.
@@ -138,7 +151,7 @@ class EnzonaSession internal constructor(
     fun beginLogin(): Unit = synchronized(lock) {
         if (closed || disconnecting) return
         invalidateWork()
-        attempt = EnzonaAuthContract.newAttempt()
+        attempt = EnzonaAuthContract.newAttempt(loginHint = loginHint())
         mutableState.value = mutableState.value.copy(authorizationUrl = attempt!!.authorizationUri.toString(),
             busy = false, failure = null)
     }
@@ -155,6 +168,7 @@ class EnzonaSession internal constructor(
         val pending = attempt ?: return false
         val exchange = try { pending.consumeCallback(value) }
         catch (failure: EnzonaAuthContract.CallbackException) {
+            EnzonaLog.warn("login failed: callback=${failure.reason}")
             if (failure.reason == EnzonaAuthContract.CallbackFailure.AUTHORIZATION_REJECTED) {
                 attempt = null
                 mutableState.value = mutableState.value.copy(authorizationUrl = null)
@@ -194,11 +208,14 @@ class EnzonaSession internal constructor(
                     restored = true
                     mutableState.value = EnzonaSessionState(ownerSubject = subject, restored = true)
                 }
+                EnzonaLog.info("session started: ${EnzonaLog.access(candidate, nowEpochSeconds())} " +
+                    "refresh_token=${if (candidate.refreshToken != null) "yes" else "no"}")
                 try { onAccount(subject, account) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* Display data only; the next refresh reads it again. */ }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
+                EnzonaLog.warn("login failed: failure=${failureFor(failure)} error=${EnzonaLog.error(failure)}${EnzonaLog.reply(failure)}")
                 synchronized(lock) {
                     if (isCurrent(expected)) mutableState.value = mutableState.value.copy(
                         authorizationUrl = null, failure = failureFor(failure))
@@ -227,22 +244,40 @@ class EnzonaSession internal constructor(
             val previous = tokens ?: throw EnzonaSessionUnavailableException(EnzonaSessionFailure.SIGN_IN_AGAIN)
             if (!previous.needsRefresh(nowEpochSeconds())) return previous
             if (previous.refreshToken == null) {
+                if (mutableState.value.failure != EnzonaSessionFailure.SIGN_IN_AGAIN) {
+                    EnzonaLog.warn("session lost: reason=no_refresh_token ${EnzonaLog.access(previous, nowEpochSeconds())}")
+                }
                 mutableState.value = mutableState.value.copy(failure = EnzonaSessionFailure.SIGN_IN_AGAIN)
                 throw EnzonaSessionUnavailableException(EnzonaSessionFailure.SIGN_IN_AGAIN)
             }
             expected = generation
             flight = refreshFlight ?: scope.async(start = CoroutineStart.LAZY) {
+                // Set once ENZONA has issued new tokens: losing them now may leave only a revoked refresh token.
+                var issued = false
                 try {
                     val renewed = network.refresh(previous)
+                    issued = true
                     ensureCurrent(expected)
                     require(renewed.accountSubject() == previous.accountSubject())
                     saveAndCommit(expected, renewed) {
                         mutableState.value = mutableState.value.copy(failure = null)
                     }
+                    EnzonaLog.info("session renewed: refresh_token=${if (renewed.refreshToken == previous.refreshToken) "kept" else "rotated"} " +
+                        "previous_${EnzonaLog.access(previous, nowEpochSeconds())} new_${EnzonaLog.access(renewed, nowEpochSeconds())}")
                     renewed
-                } catch (cancelled: CancellationException) { throw cancelled }
+                } catch (cancelled: CancellationException) {
+                    if (issued) EnzonaLog.warn("session renewal not kept: cancelled after ENZONA issued new tokens")
+                    throw cancelled
+                }
                 catch (failure: Exception) {
-                    if ((failure as? EnzonaApiException)?.oauthFailure == EnzonaOAuthFailure.INVALID_GRANT) {
+                    val invalidGrant = (failure as? EnzonaApiException)?.oauthFailure == EnzonaOAuthFailure.INVALID_GRANT
+                    val detail = "error=${EnzonaLog.error(failure)}${EnzonaLog.reply(failure)} ${EnzonaLog.access(previous, nowEpochSeconds())}"
+                    EnzonaLog.warn(when {
+                        invalidGrant -> "session lost: reason=invalid_grant $detail"
+                        issued -> "session renewal not kept: $detail (ENZONA issued new tokens; the saved refresh token may be revoked)"
+                        else -> "session renewal failed: failure=${failureFor(failure)} $detail (session kept)"
+                    })
+                    if (invalidGrant) {
                         clearInvalidSession(expected)
                     }
                     synchronized(lock) {
@@ -279,6 +314,8 @@ class EnzonaSession internal constructor(
     fun expire(rejected: EnzonaTokens): Unit = synchronized(lock) {
         val current = tokens ?: return
         if (current.accessToken == rejected.accessToken) {
+            // Long before its expiry, this suggests the token was revoked on ENZONA's side.
+            EnzonaLog.warn("access token refused by ENZONA (401 Invalid Credentials) ${EnzonaLog.access(current, nowEpochSeconds())}")
             tokens = EnzonaTokens(current.accessToken, current.refreshToken, current.idToken, 0)
         }
     }
@@ -296,7 +333,8 @@ class EnzonaSession internal constructor(
         // Once sign-out is requested, caller cancellation/close cannot skip the disk deletion.
         return withContext(NonCancellable + ioDispatcher) {
             val cleared = try { storageMutex.withLock { persistence.clear() }; true }
-            catch (_: Exception) { false }
+            catch (error: Exception) { EnzonaLog.warn("session file not erased: error=${EnzonaLog.error(error)}"); false }
+            EnzonaLog.info("session lost: reason=sign_out erased=$cleared")
             synchronized(lock) {
                 disconnecting = false
                 restored = true
@@ -328,7 +366,7 @@ class EnzonaSession internal constructor(
         withContext(NonCancellable + ioDispatcher) {
             storageMutex.withLock {
                 val previous = synchronized(lock) { checkCurrent(expected); tokens }
-                persistence.save(candidate)
+                try { persistence.save(candidate) } catch (failure: Exception) { throw StorageFailure(failure) }
                 val accepted = synchronized(lock) {
                     if (isCurrent(expected)) {
                         tokens = candidate
@@ -354,7 +392,8 @@ class EnzonaSession internal constructor(
                 tokens = null
                 mutableState.value = mutableState.value.copy(ownerSubject = null)
             }
-            try { persistence.clear() } catch (_: Exception) {
+            try { persistence.clear() } catch (error: Exception) {
+                EnzonaLog.warn("session file not erased: error=${EnzonaLog.error(error)}")
                 synchronized(lock) {
                     if (isCurrent(expected)) mutableState.value = mutableState.value.copy(failure = EnzonaSessionFailure.LOCAL_CLEAR_FAILED)
                 }
@@ -383,12 +422,17 @@ class EnzonaSession internal constructor(
         synchronized(lock) { checkCurrent(expected) }
     }
 
+    /** Storing the session failed: told apart from the network, whatever the exception type. */
+    private class StorageFailure(cause: Exception) : Exception(cause)
+
     private fun failureFor(failure: Exception): EnzonaSessionFailure = when ((failure as? EnzonaApiException)?.oauthFailure) {
         EnzonaOAuthFailure.INVALID_GRANT -> EnzonaSessionFailure.SIGN_IN_AGAIN
         EnzonaOAuthFailure.INVALID_CLIENT, EnzonaOAuthFailure.UNAUTHORIZED_CLIENT -> EnzonaSessionFailure.CLIENT_REJECTED
         EnzonaOAuthFailure.ACCESS_DENIED -> EnzonaSessionFailure.ACCESS_DENIED
         null -> when (failure) {
             is EnzonaApiException, is IllegalArgumentException -> EnzonaSessionFailure.SERVER_ERROR
+            is StorageFailure -> EnzonaSessionFailure.LOCAL_SAVE_FAILED
+            is InterruptedIOException -> EnzonaSessionFailure.TIMEOUT
             else -> EnzonaSessionFailure.UNAVAILABLE
         }
         else -> EnzonaSessionFailure.SERVER_ERROR

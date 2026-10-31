@@ -17,11 +17,20 @@ sealed interface Dest {
     data class Operation(val key: String) : Dest
     data object Settings : Dest
     data object PasswordSettings : Dest
+    /** A card added to the ENZONA account, from Ajustes › Tarjetas. */
+    data object AddCard : Dest
     data object About : Dest
     data object Licenses : Dest
+    /** Everyone: the phone's address book and the contacts kept only in the app. */
+    data object AllContacts : Dest
     data class ContactDetail(val id: String) : Dest
-    /** [prefill] carries what is already known of a new contact: a scanned number, a picked phone contact, a paid card. */
+    /** A contact kept only in the app. [prefill] carries what is already known of a new one: a scanned number, a paid card. */
     data class ContactEdit(val id: String?, val prefill: Contact? = null) : Dest
+    /**
+     * One card of a contact: new ([cardId] null) or saved. With [thenTransfer] it goes on to a transfer: someone chosen
+     * in Transferir who had no card.
+     */
+    data class CardEdit(val contactId: String, val cardId: String? = null, val thenTransfer: Boolean = false) : Dest
     data object Recipient : Dest
     data class Amount(val recipient: RecipientUi, val amount: BigDecimal? = null, val fixed: Boolean = false, val description: String? = null) : Dest
     data class Review(val recipient: RecipientUi, val amount: BigDecimal, val cardId: String, val description: String?) : Dest

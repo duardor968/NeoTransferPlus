@@ -7,7 +7,16 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The system dialog that lets the periodic credit check run with the app closed. Not a Play app. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:ignore="BatteryLife" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <queries>
+        <!-- Transsion's "Inicio automático" list (TECNO), offered when the phone has it. -->
+        <intent>
+            <action android:name="com.cyin.himgr.applicationmanager.view.activities.AUTO_START_ACTIVITY" />
+        </intent>
+    </queries>
 
     <application
         android:name=".PlusApplication"

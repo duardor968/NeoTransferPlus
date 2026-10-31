@@ -25,25 +25,25 @@ NeoTransfer+ es una app Android independiente para ENZONA. No está afiliada a X
 - **Cartera.** Las tarjetas que tienes vinculadas en ENZONA, con su saldo y cuándo se leyó. ENZONA solo da los cuatro últimos dígitos: puedes completar el número para verlo y copiarlo.
 - **Transferir** a una tarjeta (escribe el número, escanéalo o elige un contacto) o a una cuenta ENZONA, leyendo su QR. Revisas el destino y el importe y confirmas con la huella.
 - **Pagar con QR** de comercios ENZONA: la app consulta el código, te muestra el comercio y el importe (o lo escribes tú, si el QR no lo trae) y pagas con la huella.
-- **Cobrar.** Escribe el importe y ENZONA genera el QR de tu cuenta, para mostrarlo o compartirlo.
-- **Servicios:** facturas de electricidad y de teléfono fijo, y recargas de Nauta y Nauta Hogar, con la deuda pendiente a la vista. Lo que ya pagaste queda a un toque.
+- **Cobrar.** El QR de tu cuenta, que genera ENZONA, para mostrarlo o compartirlo; con «Pedir importe», el QR lleva ya la cantidad.
+- **Servicios:** facturas de electricidad y de teléfono fijo, y recargas de Nauta y Nauta Hogar, con la deuda pendiente a la vista. Lo que ENZONA confirma queda en Guardados, a un toque y con el nombre que le pongas; las cuentas Nauta también se recargan desde «Recargar», en Inicio.
 - **Actividad.** El historial de tu cuenta ENZONA, con búsqueda, entradas y salidas, y días anteriores bajo demanda; cada operación con su comprobante para compartir. Y los últimos movimientos que el banco informa de cada tarjeta.
-- **Transferencias recibidas.** Con conexión, la app revisa tu cuenta cada 15 minutos aunque esté cerrada y te avisa de quién te transfirió y cuánto.
-- **Contactos.** Varias tarjetas y teléfonos por persona, escritos, escaneados o importados de los contactos del teléfono.
+- **Transferencias recibidas.** Con conexión, la app revisa tu cuenta cada 15 minutos aunque esté cerrada y te avisa de quién te transfirió y cuánto. Para que el teléfono no la detenga, pide quedar fuera del ahorro de batería y, en los TECNO, que la actives en «Inicio automático»; lo cambias en Ajustes › Avisos con la app cerrada.
+- **Contactos.** Los de la agenda del teléfono, sin importar nada. La pestaña muestra a quien le enviaste dinero desde la app o le guardaste una tarjeta, y «Todos los contactos», a todos. Sus tarjetas se gestionan en su ficha, cada una con la imagen de su banco; el banco y la moneda se leen del número.
 - **Escáner.** Lee QR y números de tarjeta y de móvil, impresos o escritos a mano, también desde una imagen. Lo abres desde la app, con «Escanear» al mantener pulsado el icono o desde los Ajustes rápidos. El QR de tarjeta de Transfermóvil abre una transferencia a esa tarjeta.
 
 ## Cómo funciona
 
 Entras con tu usuario de ENZONA en la página de acceso de ENZONA, dentro de la app. A partir de ahí la app habla por Internet con los servidores de ENZONA, como la app oficial, y guarda en el teléfono lo último que leyó para mostrarlo aunque no haya conexión.
 
-Cada pago se envía una sola vez. Si la respuesta no llega, queda «Sin confirmar» y se comprueba en la actividad: la app nunca lo reenvía sola.
+Cada pago se envía una sola vez. Si la respuesta no llega, queda «Sin confirmar» y la app lo busca en tu historial de ENZONA: la app nunca lo reenvía sola. Si no aparece al día siguiente, puedes marcarlo como no realizado.
 
 Es una versión temprana que sigue el contrato de la app oficial y lo comprueba con pruebas automáticas, pero todavía no se ha probado contra el servidor de ENZONA; si algo no sale como esperas, abre un [issue](https://github.com/duardor968/NeoTransferPlus/issues) sin datos personales.
 
 ## Requisitos
 
 - Android 15 o más nuevo, de 64 bits.
-- Una cuenta ENZONA con tus tarjetas ya vinculadas en la app oficial. NeoTransfer+ no crea cuentas ni vincula tarjetas.
+- Una cuenta ENZONA. NeoTransfer+ no crea cuentas; las tarjetas se añaden en Ajustes › Tarjetas o en la app oficial.
 - Conexión a Internet en la red cubana, con datos móviles o wifi.
 - Una huella configurada en el teléfono para pagar.
 
@@ -58,11 +58,11 @@ Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus d
 
 ## Primeros pasos
 
-1. Al abrir la app, Android te pide Cámara, Notificaciones y Contactos de una vez. Ninguno es obligatorio para entrar.
+1. Al abrir la app, Android te pide Cámara, Notificaciones y Contactos de una vez, y después que la app funcione sin límite de batería. Ninguno es obligatorio para entrar.
 2. Toca «Entrar con ENZONA» y escribe tu usuario y contraseña en la página de ENZONA.
 3. La app lee tu cuenta, tus tarjetas, sus saldos y la actividad de la última semana.
 4. Si quieres ver el número completo de una tarjeta, tócala y escríbelo.
-5. En el primer pago, escribe tu contraseña de pago de ENZONA y confírmala con la huella. Desde entonces, cada pago solo pide la huella.
+5. En el primer pago, escribe tu contraseña de pago de ENZONA (6 dígitos) y confírmala con la huella. Cuando ENZONA confirma ese pago, la app la guarda y cada pago siguiente solo pide la huella; si un pago no se confirma, la pide otra vez.
 
 Con el bloqueo de pantalla activado, la app se desbloquea con la huella o el PIN del teléfono al abrirla y al volver después de un minuto fuera.
 
@@ -72,13 +72,13 @@ Con el bloqueo de pantalla activado, la app se desbloquea con la huella o el PIN
 - Tu contraseña de acceso la escribes en la página de ENZONA; la app guarda solo la sesión, cifrada con una clave del Android Keystore.
 - La contraseña de pago se guarda cifrada y solo se abre con tu huella; si registras una huella nueva, se borra y la app la pide otra vez. Viaja cifrada con la clave pública de ENZONA en cada pago.
 - Al entrar, como hace la app oficial, la app envía a ENZONA datos básicos del teléfono: modelo, fabricante, placa, versión y compilación de Android, tipo de red y dirección IP local. Nunca el IMEI ni el número de la SIM.
-- Tarjetas, saldos, actividad y contactos se guardan en el teléfono y no entran en las copias de seguridad de Google. Cerrar sesión borra la sesión, las tarjetas, los saldos, el historial descargado y la contraseña de pago; los contactos se conservan.
+- Tarjetas, saldos, actividad y contactos se guardan en el teléfono y no entran en las copias de seguridad de Google. La agenda se lee en el teléfono y no sale de él; la app solo guarda las tarjetas que le añades. Cerrar sesión borra la sesión, las tarjetas, los saldos, el historial descargado y la contraseña de pago; los contactos se conservan.
 - El escáner lee los códigos en el propio teléfono, con ML Kit empaquetado en la app. La app retira el componente con el que ML Kit envía informes de uso a Google, así que no salen.
 - En la pantalla de bloqueo, las notificaciones solo dicen «Transferencia recibida». Las pantallas con contraseñas no permiten capturas.
 
 ## NeoTransfer
 
-[NeoTransfer](https://github.com/duardor968/NeoTransfer) es la app hermana para Transfermóvil: opera con BPA y BANDEC por USSD y SMS, y funciona sin datos móviles. Son apps independientes; puedes tener las dos.
+[NeoTransfer](https://github.com/duardor968/NeoTransfer) es la app hermana para Transfermóvil: opera con BPA, BANDEC y Metropolitano por USSD y SMS, y funciona sin datos móviles. Son apps independientes; puedes tener las dos.
 
 ## Desarrollo
 
@@ -96,4 +96,4 @@ Kotlin y Jetpack Compose, en cuatro módulos: `core` (contrato de ENZONA, Kotlin
 
 [Apache 2.0](LICENSE). Las fuentes Inter y Arimo (OFL) y los iconos Material Symbols (Apache 2.0) conservan sus licencias, incluidas en `app/src/main/assets/licenses/`.
 
-Los fondos de las tarjetas BPA y BANDEC son reconstrucciones vectoriales hechas a partir de fotos de tarjetas, no archivos oficiales de los bancos; los logotipos y marcas que muestran pertenecen a sus dueños. No contienen datos personales: el número, el titular y el vencimiento los dibuja la app.
+Los fondos de las tarjetas BPA, BANDEC y Metropolitano son reconstrucciones vectoriales hechas a partir de fotos de tarjetas, no archivos oficiales de los bancos; los logotipos y marcas que muestran pertenecen a sus dueños. No contienen datos personales: el número, el titular y el vencimiento los dibuja la app.

@@ -2,11 +2,14 @@ package dev.duardo.neotransfer.plus.data.enzona.db
 
 import androidx.room.withTransaction
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
+import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentEvidence
 import dev.duardo.neotransfer.plus.core.read.EnzonaTransaction
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntentType
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaJournalEntry
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentJournal
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaReconciliation
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaReconciliationChange
 import dev.duardo.neotransfer.plus.core.service.EnzonaInvoiceService
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -28,7 +31,16 @@ internal interface EnzonaLocalStore : EnzonaPaymentJournal {
     suspend fun markNoticesDelivered(owner: String, ids: List<String>)
     fun observeCardLinks(owner: String): Flow<List<EnzonaCardLink>>
     suspend fun putCardLink(link: EnzonaCardLink)
+    /** Erases what is kept of one card the account no longer has: its full number, alias and balance. */
+    suspend fun forgetCard(owner: String, cardUuid: String)
     fun observeJournal(owner: String): Flow<List<EnzonaJournalEntry>>
+    /** Applies what the history says of UNKNOWN attempts ([EnzonaReconciliation]); anything else is left as it is. */
+    suspend fun reconcile(owner: String, changes: List<EnzonaReconciliationChange>)
+    /**
+     * The person's own resolution of an UNKNOWN attempt that a history read at least [EnzonaReconciliation.AFTER] after
+     * it did not find. The state stays UNKNOWN; false when it does not qualify.
+     */
+    suspend fun markNotDone(owner: String, id: String, at: Long): Boolean
     /** Erases the owner's cached reads, history and card links. Never touches the payment journal. */
     suspend fun clearOwner(owner: String)
 }
@@ -78,7 +90,30 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
         database.withTransaction { dao.putCardLink(link) }
     }
 
+    override suspend fun forgetCard(owner: String, cardUuid: String) {
+        checkOwner(owner)
+        require(cardUuid.isNotBlank())
+        database.withTransaction {
+            dao.deleteCardLink(owner, cardUuid)
+            dao.deleteCacheRow(owner, EnzonaReadKind.BALANCE, cardUuid)
+        }
+    }
+
     override fun observeJournal(owner: String) = dao.observeJournal(checkOwner(owner))
+
+    override suspend fun reconcile(owner: String, changes: List<EnzonaReconciliationChange>) {
+        checkOwner(owner)
+        database.withTransaction {
+            for (change in changes) when (change) {
+                is EnzonaReconciliationChange.Settle -> dao.settle(owner, change.id, change.state, change.remoteId, change.matchedBy)
+                is EnzonaReconciliationChange.Seen -> dao.seenInHistory(owner, change.id)
+                is EnzonaReconciliationChange.NotFound -> dao.notFoundInHistory(owner, change.id, change.at)
+            }
+        }
+    }
+
+    override suspend fun markNotDone(owner: String, id: String, at: Long) =
+        database.withTransaction { dao.markNotDone(checkOwner(owner), id, at, EnzonaReconciliation.AFTER) == 1 }
 
     override suspend fun clearOwner(owner: String) {
         checkOwner(owner)
@@ -106,8 +141,23 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
     override suspend fun tryBeginSubmission(owner: String, id: String) =
         database.withTransaction { dao.tryBeginSubmission(checkOwner(owner), id) == 1 }
 
-    override suspend fun markTimedOut(owner: String, id: String) =
-        database.withTransaction { dao.markTimedOut(checkOwner(owner), id) == 1 }
+    override suspend fun markUnknown(owner: String, id: String, evidence: EnzonaPaymentEvidence?) = database.withTransaction {
+        val current = dao.intent(checkOwner(owner), id) ?: return@withTransaction false
+        if (current.state != EnzonaIntentState.SUBMITTING && current.state != EnzonaIntentState.UNKNOWN) return@withTransaction false
+        dao.recordReply(owner, id, EnzonaIntentState.UNKNOWN, current.remoteId ?: evidence?.transactionUuid,
+            evidence?.httpStatus ?: current.httpStatus ?: 0, evidence?.fault?.code ?: current.faultCode,
+            evidence?.fault?.text ?: current.faultText)
+        current.state == EnzonaIntentState.SUBMITTING
+    }
+
+    override suspend fun markNotDelivered(owner: String, id: String) = database.withTransaction {
+        val current = dao.intent(checkOwner(owner), id) ?: return@withTransaction false
+        if (!current.couldBeUndelivered()) return@withTransaction false
+        dao.recordReply(owner, id, EnzonaIntentState.NOT_DELIVERED, null, current.httpStatus, null, null)
+        true
+    }
+
+    override suspend fun abandonFlights() = database.withTransaction { dao.abandonFlights() }
 
     /** Accepts only a decoded terminal result and an actually observed remote ID; never undoes one. */
     override suspend fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?): Boolean {
@@ -125,6 +175,10 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
 }
 
 private fun checkOwner(owner: String): String = owner.also { require(it.isNotBlank()) { "ENZONA ownerSubject is required" } }
+
+/** In flight, or unconfirmed with no trace of a reply: only then can "never left the phone" be true. */
+internal fun EnzonaJournalEntry.couldBeUndelivered(): Boolean =
+    (state == EnzonaIntentState.SUBMITTING || state == EnzonaIntentState.UNKNOWN) && remoteId == null && (httpStatus ?: 0) == 0
 
 internal fun validateCardLink(link: EnzonaCardLink) {
     require(link.ownerSubject.isNotBlank() && link.cardUuid.isNotBlank())

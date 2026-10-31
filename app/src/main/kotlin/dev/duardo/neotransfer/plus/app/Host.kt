@@ -13,7 +13,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import dev.duardo.neotransfer.plus.app.routes.AboutRoute
 import dev.duardo.neotransfer.plus.app.routes.ActivityRoute
+import dev.duardo.neotransfer.plus.app.routes.AddCardRoute
+import dev.duardo.neotransfer.plus.app.routes.AllContactsRoute
 import dev.duardo.neotransfer.plus.app.routes.AmountRoute
+import dev.duardo.neotransfer.plus.app.routes.CardEditRoute
 import dev.duardo.neotransfer.plus.app.routes.ContactEditRoute
 import dev.duardo.neotransfer.plus.app.routes.ContactRoute
 import dev.duardo.neotransfer.plus.app.routes.ContactsRoute
@@ -67,10 +70,13 @@ private fun Screen(plus: PlusApp, dest: Dest) {
         is Dest.Operation -> OperationRoute(plus, dest.key)
         Dest.Settings -> SettingsRoute(plus)
         Dest.PasswordSettings -> PasswordSettingsRoute(plus)
+        Dest.AddCard -> AddCardRoute(plus)
         Dest.About -> AboutRoute(plus)
         Dest.Licenses -> LicensesRoute(plus)
+        Dest.AllContacts -> AllContactsRoute(plus)
         is Dest.ContactDetail -> ContactRoute(plus, dest.id)
         is Dest.ContactEdit -> ContactEditRoute(plus, dest)
+        is Dest.CardEdit -> CardEditRoute(plus, dest)
         Dest.Recipient -> RecipientRoute(plus)
         is Dest.Amount -> AmountRoute(plus, dest)
         is Dest.Review -> ReviewRoute(plus, dest)

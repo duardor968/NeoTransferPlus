@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,14 +38,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.plus.designsystem.component.MoneyText
+import dev.duardo.neotransfer.plus.designsystem.component.NeoAmountField
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButtonStyle
+import dev.duardo.neotransfer.plus.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
@@ -56,6 +58,8 @@ import dev.duardo.neotransfer.plus.ui.model.PayReviewUi
 import java.math.BigDecimal
 
 interface PayQrActions {
+    fun close()
+    fun addCard()
     fun amount(value: String)
     fun description(value: String)
     fun source(index: Int)
@@ -64,20 +68,16 @@ interface PayQrActions {
 }
 
 /**
- * Pay a merchant QR. The camera fills the screen ([cameraContent] is the scanner, with its own close, torch and
- * gallery); once ENZONA resolves the code, the review rises from the bottom with only what can still change.
+ * Pay a merchant QR. The camera fills the screen ([cameraContent] is the scanner, with its own torch and gallery)
+ * under the bar that closes it; once ENZONA resolves the code, the review rises from the bottom with only what can
+ * still change.
  */
 @Composable
 fun PayQrScreen(state: PayQrUi, actions: PayQrActions, cameraContent: @Composable () -> Unit, modifier: Modifier = Modifier) {
     LightSystemIcons()
     Box(modifier.fillMaxSize().background(Color.Black)) {
         cameraContent()
-        Text(
-            "Pagar",
-            Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 22.dp),
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White,
-        )
+        CameraBar(actions, Modifier.align(Alignment.TopCenter))
         AnimatedVisibility(
             visible = state !is PayQrUi.Scanning,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -89,7 +89,7 @@ fun PayQrScreen(state: PayQrUi, actions: PayQrActions, cameraContent: @Composabl
                     when (current) {
                         PayQrUi.Resolving -> Resolving()
                         is PayQrUi.Review -> Review(current.review, actions)
-                        is PayQrUi.Unsupported -> Unsupported(current.message, actions)
+                        is PayQrUi.Unsupported -> Unsupported(current, actions)
                         PayQrUi.Scanning -> Unit
                     }
                 }
@@ -108,6 +108,19 @@ private fun LightSystemIcons() {
         val previous = controller?.isAppearanceLightStatusBars
         controller?.isAppearanceLightStatusBars = false
         onDispose { if (previous != null) controller.isAppearanceLightStatusBars = previous }
+    }
+}
+
+@Composable
+private fun CameraBar(actions: PayQrActions, modifier: Modifier) {
+    Row(
+        modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = NeoSpace.s, vertical = NeoSpace.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(actions::close, Modifier.size(48.dp).background(Color.Black.copy(alpha = 0.38f), CircleShape)) {
+            Icon(painterResource(Ds.drawable.ic_close), "Cerrar", tint = Color.White)
+        }
+        Text("Pagar", Modifier.weight(1f).padding(start = NeoSpace.m), style = MaterialTheme.typography.titleLarge, color = Color.White)
     }
 }
 
@@ -155,7 +168,7 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
             Text(review.merchant, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
         }
         if (review.amountEditable) {
-            NeoTextField(review.amountInput, actions::amount, "Importe", keyboardType = KeyboardType.Decimal, suffix = review.currency)
+            NeoAmountField(review.amountInput, actions::amount, review.currency)
         } else {
             val amount = review.amountInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
             MoneyText(amount, review.currency, Modifier.padding(vertical = NeoSpace.xs), style = MaterialTheme.typography.displaySmall, hero = true)
@@ -174,14 +187,21 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
 }
 
 @Composable
-private fun Unsupported(message: String, actions: PayQrActions) {
+private fun Unsupported(state: PayQrUi.Unsupported, actions: PayQrActions) {
     Column(Modifier.padding(vertical = NeoSpace.s), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
             Box(Modifier.size(44.dp).background(Neo.colors.warningContainer, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(painterResource(Ds.drawable.ic_error), null, tint = Neo.colors.warning)
             }
-            Text(message, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(state.message, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
         }
-        NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
+            if (state.addCard) {
+                NeoButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add_card)
+                NeoTextButton("Escanear otro", actions::rescan, Modifier.fillMaxWidth())
+            } else {
+                NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+            }
+        }
     }
 }

@@ -1,6 +1,10 @@
 package dev.duardo.neotransfer.plus.data.enzona
 
 import dev.duardo.neotransfer.plus.core.auth.EnzonaTokens
+import dev.duardo.neotransfer.plus.core.card.EnzonaBank
+import dev.duardo.neotransfer.plus.core.card.EnzonaCardJson
+import dev.duardo.neotransfer.plus.core.card.EnzonaCardRequest
+import dev.duardo.neotransfer.plus.core.card.EnzonaCoordinates
 import dev.duardo.neotransfer.plus.core.money.Amounts
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentEvidence
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentJson
@@ -26,6 +30,7 @@ import kotlinx.serialization.json.put
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 private val JSON_UTF8 = "application/json; charset=utf-8".toMediaType()
@@ -84,14 +89,17 @@ internal class EnzonaQrApi(private val execute: EnzonaExecute, private val now: 
         return EnzonaQrJson.resolved(reply.body, code, ownerSubject, now())
     }
 
-    /** Creates a server-issued receive code; it does not submit any transfer/payment. */
-    suspend fun createOwn(tokens: EnzonaTokens, ownerSubject: String, amount: BigDecimal, currency: String,
+    /**
+     * Creates a server-issued receive code; it does not submit any transfer/payment. Without [amount] the key is left
+     * out and the payer types it (not yet checked against the server).
+     */
+    suspend fun createOwn(tokens: EnzonaTokens, ownerSubject: String, amount: BigDecimal?, currency: String,
         description: String? = null): EnzonaOwnQr {
         checkOwner(tokens, ownerSubject)
-        require(amount.signum() > 0 && currency.isNotBlank() && currency.none(Char::isISOControl)) { "Importe o moneda no válido" }
+        require((amount == null || amount.signum() > 0) && currency.isNotBlank() && currency.none(Char::isISOControl)) { "Importe o moneda no válido" }
         // AddQrCodeWithAmountDescriptionUseCaseParams.toJson 0x8b72dc: amount as a string.
         val json = buildJsonObject {
-            put("amount", Amounts.wire(amount)); put("currency", currency); put("description", description.orEmpty())
+            amount?.let { put("amount", Amounts.wire(it)) }; put("currency", currency); put("description", description.orEmpty())
         }
         val reply = execute(enzonaApiRequest("https://api.enzona.net/qr/v1.0.0/qr/account", tokens)
             .post(json.toString().toRequestBody(JSON_UTF8)).build())
@@ -123,6 +131,44 @@ internal class EnzonaServiceApi(private val execute: EnzonaExecute, private val 
     private fun search(code: String, clientId: String): HttpUrl = api("invoice", "v1.0.0", "invoice", "search").newBuilder()
         .addQueryParameter("service_code", code)
         .addQueryParameter("client_id", identifier(clientId)).build()
+}
+
+/** The account's cards (card module, ENZONA 1.11.0): what adding one asks, adding it, the default one, removing one. */
+internal class EnzonaCardsApi(private val execute: EnzonaExecute) {
+    // RemoteCordenateDataSourceImpl.getCordenate 0x784180: other cells on every request.
+    suspend fun coordinates(tokens: EnzonaTokens): EnzonaCoordinates =
+        read(api("nomenclator", "v1.0.0", "nomenclator", "coordinates"), tokens, EnzonaCardJson::coordinates)
+
+    // bank_datasource getAll 0x9e9274.
+    suspend fun banks(tokens: EnzonaTokens): List<EnzonaBank> = read(api("nomenclator", "v1.0.0", "nomenclator", "banks"), tokens, EnzonaCardJson::banks)
+
+    // addEntity 0x9e806c.
+    suspend fun add(tokens: EnzonaTokens, request: EnzonaCardRequest) =
+        change(enzonaApiRequest(EnzonaCardRequest.URL, tokens).post(request.json.toRequestBody(JSON_UTF8)).build())
+
+    // getSetAsDefault 0xa2cc58.
+    suspend fun setDefault(tokens: EnzonaTokens, cardUuid: String) {
+        val json = buildJsonObject { put("funding_source_uuid", identifier(cardUuid)) }
+        change(enzonaApiRequest(api("cards", "v1.0.0", "cards", "default").toString(), tokens).post(json.toString().toRequestBody(JSON_UTF8)).build())
+    }
+
+    // deleteEntity 0xa2b844: no body.
+    suspend fun remove(tokens: EnzonaTokens, cardUuid: String) =
+        change(enzonaApiRequest(api("cards", "v1.0.0", "cards", identifier(cardUuid), "delete").toString(), tokens).method("DELETE", null).build())
+
+    private suspend fun <T> read(url: HttpUrl, tokens: EnzonaTokens, decode: (String) -> T): T {
+        val reply = execute(enzonaApiRequest(url.toString(), tokens).get().build())
+        if (reply.status != 200) throw EnzonaApiException(reply.status, invalidCredentials = reply.isInvalidCredentials)
+        return decode(reply.body)
+    }
+
+    /** Done on HTTP 200 without a fault; otherwise the failure carries ENZONA's fault when it sends one. */
+    private suspend fun change(request: Request) {
+        val reply = execute(request)
+        if (reply.isInvalidCredentials) throw EnzonaApiException(401, invalidCredentials = true)
+        val fault = EnzonaServiceJson.fault(reply.body)
+        if (reply.status != 200 || fault != null) throw EnzonaServiceException(reply.status, fault)
+    }
 }
 
 internal fun interface EnzonaPaymentNetwork {

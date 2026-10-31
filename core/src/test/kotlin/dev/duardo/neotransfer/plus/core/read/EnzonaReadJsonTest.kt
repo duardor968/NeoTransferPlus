@@ -262,6 +262,14 @@ class EnzonaReadJsonTest {
         assertNull(absent.bankDebitDetail)
     }
 
+    @Test fun anOwnerInAnyShapeNeverDropsTheWeek() {
+        // A real history refused every page on "Invalid owner type"; the app does not read the owner.
+        for (owner in listOf("false", "17", """{"username":"x"}""", "[]", "\"persona\"")) {
+            val row = EnzonaReadJson.transactions(history("""{"transaction_uuid":"$transactionUuid","owner":$owner}""")).transactions.single()
+            assertEquals(if (owner.startsWith("\"")) "persona" else if (owner == "17") "17" else null, row.owner)
+        }
+    }
+
     @Test fun onlyExplicitEmptyListsAreAcceptedAndFaultsCannotMasqueradeAsSuccess() {
         assertEquals(emptyList(), EnzonaReadJson.cards("""{"card":[]}"""))
         assertEquals(emptyList(), EnzonaReadJson.bankOperations("""{"operation":[]}"""))

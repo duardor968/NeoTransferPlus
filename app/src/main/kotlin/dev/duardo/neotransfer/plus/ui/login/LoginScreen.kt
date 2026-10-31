@@ -51,10 +51,12 @@ val LoginProblem.message: String
         LoginProblem.Denied -> "ENZONA denegó el acceso a esta cuenta."
         LoginProblem.ServerError -> "ENZONA no pudo completar el acceso. Inténtalo más tarde."
         LoginProblem.Expired -> "Tu sesión de ENZONA caducó. Entra de nuevo."
-        LoginProblem.Offline -> "No hay conexión con ENZONA."
+        LoginProblem.Timeout -> "ENZONA tardó demasiado en responder."
+        LoginProblem.Offline -> "Sin conexión."
         LoginProblem.PageFailed -> "La página de ENZONA no cargó."
         LoginProblem.RestoreFailed -> "No se pudo leer la sesión guardada. Entra de nuevo."
         LoginProblem.ClearFailed -> "No se pudo borrar la sesión de este teléfono."
+        LoginProblem.SaveFailed -> "No se pudo guardar la sesión en este teléfono."
     }
 
 /**

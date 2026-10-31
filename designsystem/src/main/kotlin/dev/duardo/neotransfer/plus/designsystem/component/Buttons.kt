@@ -66,10 +66,21 @@ fun NeoButton(
     }
 }
 
-/** Inline action in accent ink: "Ver todo", "Reintentar". */
+/** Inline action in accent ink: "Ver todo", "Añadir teléfono"; [icon] goes before the words. */
 @Composable
-fun NeoTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = Neo.colors.accentInk, enabled: Boolean = true) {
+fun NeoTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Neo.colors.accentInk,
+    enabled: Boolean = true,
+    @DrawableRes icon: Int? = null,
+) {
     TextButton(onClick = onClick, modifier = modifier, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = color)) {
+        if (icon != null) {
+            Icon(painterResource(icon), null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+        }
         FittedText(text, MaterialTheme.typography.labelLarge)
     }
 }

@@ -53,9 +53,20 @@ class EnzonaSessionTest {
     }
 
     private fun session(store: TokenPersistence, network: FakeNetwork, close: () -> Unit = {},
-        onAccount: suspend (String, EnzonaFetched<EnzonaAccount>) -> Unit = { _, _ -> }) =
+        onAccount: suspend (String, EnzonaFetched<EnzonaAccount>) -> Unit = { _, _ -> }, loginHint: () -> String? = { null }) =
         EnzonaSession(store, network, { mapOf("accessType" to "MOBILE") }, Dispatchers.Unconfined, { 1000 }, close,
-            ioDispatcher = Dispatchers.Unconfined, onAccount = onAccount)
+            ioDispatcher = Dispatchers.Unconfined, onAccount = onAccount, loginHint = loginHint)
+
+    @Test fun signInOffersTheKnownEmailToEnzonasPage() {
+        session(MemoryTokens(), FakeNetwork(), loginHint = { "persona@example.com" }).use { manager ->
+            manager.beginLogin()
+            assertTrue(manager.state.value.authorizationUrl!!.contains("login_hint=persona%40example.com"))
+        }
+        session(MemoryTokens(), FakeNetwork()).use { manager ->
+            manager.beginLogin()
+            assertFalse(manager.state.value.authorizationUrl!!.contains("login_hint"))
+        }
+    }
 
     @Test fun expiredStoredSessionRestoresWithoutAnyServerRequest() = runBlocking {
         val cached = token("old", expiry = 900)
@@ -239,7 +250,7 @@ class EnzonaSessionTest {
             while (cause != null) {
                 assertTrue(visited.add(cause), "Cyclic exception cause chain")
                 assertTrue(cause is EnzonaSessionUnavailableException)
-                assertEquals(EnzonaSessionFailure.UNAVAILABLE, cause.failure)
+                assertEquals(EnzonaSessionFailure.TIMEOUT, cause.failure)
                 assertFalse(cause === transportFailure)
                 assertFalse(cause.toString().contains("PRIVATE_BODY"))
                 assertTrue(cause.suppressed.isEmpty())
@@ -252,7 +263,7 @@ class EnzonaSessionTest {
             assertSanitizedChain(assertFailsWith<EnzonaSessionUnavailableException> { manager.usableTokens() })
             assertSame(old, store.value)
             assertTrue(manager.state.value.signedIn)
-            assertEquals(EnzonaSessionFailure.UNAVAILABLE, manager.state.value.failure)
+            assertEquals(EnzonaSessionFailure.TIMEOUT, manager.state.value.failure)
             assertEquals(0, store.clears)
             assertEquals(0, store.saves)
             assertEquals(listOf("refresh"), network.calls)
@@ -290,6 +301,7 @@ class EnzonaSessionTest {
             EnzonaApiException(500, EnzonaOAuthFailure.UNKNOWN) to EnzonaSessionFailure.SERVER_ERROR,
             EnzonaApiException(400, EnzonaOAuthFailure.UNAUTHORIZED_CLIENT) to EnzonaSessionFailure.CLIENT_REJECTED,
             IOException("PRIVATE") to EnzonaSessionFailure.UNAVAILABLE,
+            SocketTimeoutException("PRIVATE") to EnzonaSessionFailure.TIMEOUT,
         )
         for ((failure, expected) in cases) {
             val network = FakeNetwork().apply { exchange = { throw failure } }
@@ -308,6 +320,59 @@ class EnzonaSessionTest {
             manager.acceptCallback(callback(manager.state.value.authorizationUrl!!))
             assertEquals(EnzonaSessionFailure.SERVER_ERROR, manager.state.value.failure)
         }
+    }
+
+    @Test fun everySessionLossIsLoggedWithItsReasonAndNothingPrivate() = runBlocking {
+        val lines = collectingLog { lines ->
+            val network = FakeNetwork().apply { refresh = { token("PRIVATE_NEW") } }
+            session(MemoryTokens(token("PRIVATE_OLD", expiry = 900)), network).use { manager ->
+                val renewed = manager.usableTokens()
+                manager.expire(renewed)
+                network.refresh = { throw EnzonaApiException(400, EnzonaOAuthFailure.INVALID_GRANT) }
+                assertFailsWith<EnzonaSessionUnavailableException> { manager.usableTokens() }
+            }
+            val unreadable = object : TokenPersistence {
+                override fun load(): EnzonaTokens? = throw IllegalArgumentException("PRIVATE_MARKER")
+                override fun save(tokens: EnzonaTokens) = Unit
+                override fun clear() = Unit
+            }
+            session(unreadable, FakeNetwork()).use { it.restore() }
+            session(MemoryTokens(), FakeNetwork()).use { it.restore() }
+            session(MemoryTokens(EnzonaTokens("PRIVATE_A", null, token("x").idToken, 900)), FakeNetwork()).use { manager ->
+                repeat(2) { assertFailsWith<EnzonaSessionUnavailableException> { manager.usableTokens() } }
+                assertTrue(manager.signOut())
+            }
+            lines.toList()
+        }
+        assertEquals(listOf(
+            "session restore: saved access_expired_ago=1m40s refresh_token=yes",
+            "session renewed: refresh_token=rotated previous_access_expired_ago=1m40s new_access_expires_in=1h6m",
+            "access token refused by ENZONA (401 Invalid Credentials) access_expires_in=1h6m",
+            "session lost: reason=invalid_grant error=EnzonaApiException http=400 oauth=invalid_grant access_rejected",
+            "session lost: reason=restore_failed error=IllegalArgumentException (saved file kept)",
+            "session restore: none saved",
+            "session restore: saved access_expired_ago=1m40s refresh_token=no",
+            "session lost: reason=no_refresh_token access_expired_ago=1m40s",
+            "session lost: reason=sign_out erased=true",
+        ), lines)
+        assertTrue(lines.none { "PRIVATE" in it || "synthetic@" in it })
+    }
+
+    @Test fun renewedTokensThatCannotBeStoredAreAPhoneFailureNotAConnectionOne() = runBlocking {
+        val store = object : TokenPersistence {
+            override fun load() = token("PRIVATE_OLD", expiry = 900)
+            override fun save(tokens: EnzonaTokens) = throw IllegalStateException("PRIVATE_KEYSTORE")
+            override fun clear() = Unit
+        }
+        val lines = collectingLog { lines ->
+            session(store, FakeNetwork()).use { manager ->
+                assertEquals(EnzonaSessionFailure.LOCAL_SAVE_FAILED,
+                    assertFailsWith<EnzonaSessionUnavailableException> { manager.usableTokens() }.failure)
+            }
+            lines.toList()
+        }
+        assertEquals("session renewal not kept: error=StorageFailure<-IllegalStateException access_expired_ago=1m40s " +
+            "(ENZONA issued new tokens; the saved refresh token may be revoked)", lines.last())
     }
 
     @Test fun expireForcesOneRefreshOnlyForTheRejectedToken() = runBlocking {

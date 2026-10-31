@@ -44,6 +44,27 @@ class EnzonaPaymentJsonTest {
         assertNull(onlyUuid.transactionUuid)
     }
 
+    @Test fun aFaultIsDecodedForTheRecordButStaysUnknown() {
+        val evidence = decode(card, """{"fault":{"cod":"0507","message":"Error","description":"Contraseña\nde pago\u0007  incorrecta",
+            "transaction_uuid":"fault-id","status_code":"1112","extra":"ignored"}}""", 400)
+        assertEquals(EnzonaIntentState.UNKNOWN, evidence.state)
+        assertEquals("0507", evidence.fault!!.code)
+        assertEquals("Contraseña de pago incorrecta", evidence.fault!!.text)
+        assertEquals(listOf("cod", "message", "description", "status_code", "transaction_uuid"), evidence.fault!!.fields)
+        assertEquals("fault-id", evidence.transactionUuid)
+        assertEquals("1112", evidence.statusCode)
+        assertFalse(evidence.fault.toString().contains("incorrecta"))
+        // A message is the words when there is no description; long words are cut; the top level wins over the fault.
+        val long = decode(account, """{"transaction_uuid":"top-id","fault":{"code":900901,"message":"${"x".repeat(300)}"}}""", 401)
+        assertEquals("900901", long.fault!!.code)
+        assertEquals(EnzonaPaymentFault.MAX_TEXT, long.fault!!.text!!.length)
+        assertEquals("top-id", long.transactionUuid)
+        val invoice = decode(invoice(EnzonaInvoiceService.NAUTA), """{"fault":{"description":"Servicio no disponible"}}""", 503)
+        assertEquals(EnzonaIntentState.UNKNOWN, invoice.state)
+        assertEquals("Servicio no disponible", invoice.fault!!.text)
+        assertNull(decode(card, """{"statusCode":1111}""").fault)
+    }
+
     @Test fun camelCaseSuccessIsNotAssumedForAccountOrMerchant() {
         for (request in listOf(account, merchant)) assertEquals(EnzonaIntentState.UNKNOWN, decode(request, "{\"statusCode\":\"1111\"}").state)
     }

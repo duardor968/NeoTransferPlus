@@ -10,10 +10,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import dev.duardo.neotransfer.plus.app.ActivityQuery
 import dev.duardo.neotransfer.plus.app.Dest
+import dev.duardo.neotransfer.plus.app.LocalAuthorizer
 import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.accountActivity
 import dev.duardo.neotransfer.plus.app.inProgress
+import dev.duardo.neotransfer.plus.app.toUi
+import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.data.EnzonaFailure
+import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.platform.copyText
 import dev.duardo.neotransfer.plus.ui.home.CardSheetActions
 import dev.duardo.neotransfer.plus.ui.home.HomeActions
@@ -22,6 +26,8 @@ import dev.duardo.neotransfer.plus.ui.model.ActivitySource
 import dev.duardo.neotransfer.plus.ui.model.CardSheetUi
 import dev.duardo.neotransfer.plus.ui.model.HomeUi
 import dev.duardo.neotransfer.plus.ui.model.RefreshState
+import dev.duardo.neotransfer.plus.ui.model.SavedReferenceUi
+import dev.duardo.neotransfer.plus.ui.model.ServiceKind
 import dev.duardo.neotransfer.plus.ui.shell.Tab
 import kotlinx.coroutines.launch
 
@@ -36,6 +42,8 @@ fun HomeRoute(plus: PlusApp) {
     val account by plus.account.collectAsState()
     val contacts by plus.contactList.collectAsState()
     val selected by plus.selectedCard.collectAsState()
+    val saved by plus.saved.collectAsState()
+    val authorizer = LocalAuthorizer.current
     val nav = plus.nav
 
     val cardUis = cards.map { it.card }
@@ -49,8 +57,9 @@ fun HomeRoute(plus: PlusApp) {
         else -> activity
     }
     val pending = remember(journal, history, cardUis, contacts) {
-        inProgress(journal.orEmpty(), history.orEmpty().map { it.transactionUuid }.toSet(), cardUis, contacts.orEmpty())
+        inProgress(journal.orEmpty(), history.orEmpty().map { it.transactionUuid }.toSet(), cardUis, contacts.orEmpty(), System.currentTimeMillis())
     }
+    var recharging by rememberSaveable { mutableStateOf(false) }
 
     var sheetCard by rememberSaveable { mutableStateOf<String?>(null) }
     var input by rememberSaveable { mutableStateOf("") }
@@ -58,8 +67,11 @@ fun HomeRoute(plus: PlusApp) {
     var saving by remember { mutableStateOf(false) }
     val sheet = cardUis.firstOrNull { it.id == sheetCard }?.let { CardSheetUi(it, input, error, saving) }
 
-    val actions = remember(plus) {
+    val actions = remember(plus, authorizer) {
         object : HomeActions {
+            /** Paying needs a card of the account: without one, adding it comes first. */
+            private val noCards get() = plus.wallet.value?.isEmpty() == true
+
             override fun refresh() = plus.refresh()
             override fun selectCard(index: Int) { plus.selectedCard.value = index }
             override fun refreshBalance(cardId: String) = plus.refreshBalance(cardId)
@@ -68,10 +80,39 @@ fun HomeRoute(plus: PlusApp) {
                 input = ""
                 error = null
             }
-            override fun transfer() = nav.push(Dest.Recipient)
-            override fun pay() = nav.push(Dest.Pay())
+            override fun addCard() = nav.push(Dest.AddCard)
+            override fun transfer() = if (noCards) addCard() else nav.push(Dest.Recipient)
+            override fun pay() = if (noCards) addCard() else nav.push(Dest.Pay())
             override fun receive() = nav.push(Dest.Receive)
+            override fun recharge() {
+                if (noCards) addCard() else recharging = true
+            }
+            override fun rechargeTo(reference: SavedReferenceUi) {
+                recharging = false
+                nav.push(Dest.Service(reference.kind, reference.value))
+            }
+            override fun rechargeNew(kind: ServiceKind) {
+                recharging = false
+                nav.push(Dest.Service(kind))
+            }
+            override fun closeRecharge() { recharging = false }
             override fun openOperation(id: String) = nav.push(Dest.Operation(id))
+            override fun retry(id: String) {
+                val entry = plus.journal.value?.firstOrNull { "j:${it.intent.id}" == id && it.state == EnzonaIntentState.NOT_DELIVERED } ?: return
+                val operation = entry.toUi(plus.wallet.value.orEmpty().map { it.toUi() }, plus.contactList.value.orEmpty())
+                val money = operation.amount?.let { formatMoney(it.amount, it.currency) }.orEmpty()
+                // Its one dispatch never reached ENZONA: a new intent with the same values, a new approval, its own result.
+                plus.scope.launch {
+                    val again = try { plus.prepareAgain(entry.intent) } catch (_: Exception) {
+                        plus.say("No se pudo preparar el pago.")
+                        return@launch
+                    }
+                    authorizer.authorize("Enviar $money", operation.title, "Guardar y enviar", onPassword = { password, sealed ->
+                        plus.submit(again, password, sealed)
+                        nav.push(Dest.Result(again.id))
+                    }, onProblem = plus::say)
+                }
+            }
             override fun allActivity() {
                 plus.activity.value = plus.activity.value.copy(source = ActivitySource.Account)
                 nav.tab = Tab.Activity
@@ -106,11 +147,18 @@ fun HomeRoute(plus: PlusApp) {
             plus.activity.value = ActivityQuery(source = ActivitySource.Cards, card = id)
             nav.tab = Tab.Activity
         }
+        override fun settings() {
+            sheetCard = null
+            nav.push(Dest.Settings)
+        }
         override fun close() { sheetCard = null }
     }
 
     HomeScreen(
-        HomeUi(cards, selected.coerceIn(0, (cards.size - 1).coerceAtLeast(0)), pending, recent, refresh),
+        HomeUi(
+            cards, selected.coerceIn(0, (cards.size - 1).coerceAtLeast(0)), pending, recent, refresh,
+            recharge = if (recharging) saved.filter { it.kind == ServiceKind.Nauta || it.kind == ServiceKind.NautaHome } else null,
+        ),
         actions,
         sheet = sheet,
         sheetActions = sheetActions,

@@ -7,15 +7,20 @@ import android.view.WindowManager
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -27,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
@@ -35,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
@@ -51,7 +56,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -60,7 +70,7 @@ import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 
-/** Round shortcut with its label. One [primary] per row carries the accent. */
+/** Round shortcut with its label. One [primary] per row carries the accent. In rows, use [QuickActionGrid]. */
 @Composable
 fun QuickAction(
     @DrawableRes icon: Int,
@@ -68,20 +78,32 @@ fun QuickAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     primary: Boolean = false,
-    enabled: Boolean = true,
+    labelStyle: TextStyle = MaterialTheme.typography.labelMedium,
 ) {
     val container = if (primary) Neo.colors.accent else Neo.colors.group
     val content = if (primary) Neo.colors.onAccent else MaterialTheme.colorScheme.onSurface
+    val interaction = remember { MutableInteractionSource() }
     Column(
-        modifier.alpha(if (enabled) 1f else 0.38f).clip(RoundedCornerShape(NeoRadius.field))
-            .clickable(enabled = enabled, onClick = onClick).padding(vertical = NeoSpace.s),
+        modifier
+            .clip(RoundedCornerShape(NeoRadius.field))
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(vertical = NeoSpace.s),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
     ) {
-        Box(Modifier.size(56.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .pressScale(interaction, 0.92f)
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(container)
+                .then(if (primary) Modifier else Modifier.rim(CircleShape))
+                .indication(interaction, ripple()),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(painterResource(icon), null, tint = content)
         }
-        FittedLabel(label)
+        Text(label, style = labelStyle, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
 
@@ -108,10 +130,38 @@ fun FittedText(
     )
 }
 
+/**
+ * Data joined by « · » («BPA · CUP · Predeterminada»), side by side while they fit. The one that does not fit goes down
+ * to the next line without its dot, and one wider than the whole line breaks inside itself: a dot never ends or starts
+ * a line. A dot between no-break spaces belongs to its datum and never splits (the issuer, «BANDEC · CUP»).
+ * Accessibility reads [text] as given, one string.
+ */
 @Composable
-fun FittedLabel(text: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) {
-    FittedText(text, MaterialTheme.typography.labelMedium, modifier, color, TextAlign.Center)
+fun SeparatedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = LocalContentColor.current,
+    textAlign: TextAlign? = null,
+) {
+    val resolved = style.copy(color = color, textAlign = textAlign ?: style.textAlign)
+    val parts = text.split(Separator)
+    if (parts.size == 1) {
+        BasicText(text, modifier, resolved)
+        return
+    }
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier.clearAndSetSemantics { this.text = AnnotatedString(text) }) {
+        val lines = mutableListOf(parts.first())
+        parts.drop(1).forEach { part ->
+            val joined = lines.last() + Separator + part
+            if (measurer.measure(joined, resolved).size.width <= constraints.maxWidth) lines[lines.lastIndex] = joined else lines += part
+        }
+        BasicText(lines.joinToString("\n"), style = resolved)
+    }
 }
+
+private const val Separator = " · "
 
 /** Modal sheet with the system's surface and handle. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,7 +182,8 @@ fun NeoBottomSheet(
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = NeoSpace.l)) {
             if (title != null) Text(
                 title,
-                Modifier.padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.s),
+                // The screen's gutter: the edge of the fields and groups below, and of row text (rows add their own padding).
+                Modifier.padding(horizontal = NeoSpace.gutter).padding(bottom = NeoSpace.s),
                 style = MaterialTheme.typography.titleLarge,
             )
             content()
@@ -234,4 +285,40 @@ private tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.activity()
     else -> null
+}
+
+@Immutable
+data class QuickActionItem(@param:DrawableRes val icon: Int, val label: String, val onClick: () -> Unit, val primary: Boolean = false)
+
+/**
+ * Shortcuts in rows of up to [columns]: the first and last columns sit on the edges and the rest spread evenly,
+ * so every row lines up with the screen's margins. Labels keep the user's font size and wrap to two lines at word
+ * breaks. When a single word would not fit, a grid of several rows drops to three columns first; a single row never
+ * reflows (it would leave one shortcut alone below). Then the size steps down, the same for every label.
+ */
+@Composable
+fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier, columns: Int = 4) {
+    val measurer = rememberTextMeasurer()
+    val base = MaterialTheme.typography.labelMedium
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        fun widthOf(text: String) = with(density) { measurer.measure(text, base, maxLines = 1).size.width.toDp() }
+        val longestWord = items.flatMap { it.label.split(' ') }.maxOf(::widthOf)
+        val longestLabel = items.maxOf { widthOf(it.label) }
+        val count = if (items.size > columns && columns > 3 && (maxWidth / columns - NeoSpace.s) < longestWord) 3 else columns
+        val room = maxWidth / count - NeoSpace.s
+        val scale = (room / longestWord).coerceAtMost(1f)
+        val cell = (longestLabel * scale).coerceIn(64.dp, room)
+        val step = if (count > 1) (maxWidth - cell) / (count - 1) else 0.dp
+        val label = base.copy(fontSize = base.fontSize * scale)
+        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+            items.chunked(count).forEach { row ->
+                Box(Modifier.fillMaxWidth()) {
+                    row.forEachIndexed { index, item ->
+                        QuickAction(item.icon, item.label, item.onClick, Modifier.offset(x = step * index).width(cell), item.primary, label)
+                    }
+                }
+            }
+        }
+    }
 }

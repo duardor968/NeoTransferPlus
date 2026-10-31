@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.plus.data
 
 import android.content.Context
+import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -9,10 +10,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dev.duardo.neotransfer.plus.R
+import dev.duardo.neotransfer.plus.core.card.EnzonaCardRequests
 import dev.duardo.neotransfer.plus.core.crypto.EnzonaCipher
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentRequests
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaCardsApi
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaDeviceInfo
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaHttp
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaLog
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaLoginHint
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaLoginWeb
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentApi
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentCoordinator
@@ -31,25 +36,43 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** Process-wide wiring: one HTTP client, one session, one database. */
 class EnzonaDataGraph private constructor(context: Context) {
     private val app = context.applicationContext
+    init { EnzonaLog.sink = { warning, line -> Log.println(if (warning) Log.WARN else Log.INFO, EnzonaLog.TAG, line) } }
     private val http = EnzonaHttp()
     private val store = RoomEnzonaStore(EnzonaDatabase.open(app))
     private val sessionApi = EnzonaSessionApi(http::execute)
+    private val loginHint = EnzonaLoginHint(app)
     private val session = EnzonaSession(EnzonaSessionStore(app), SessionNetwork(sessionApi), EnzonaDeviceInfo(app)::fields,
-        onAccount = { owner, account -> store.cache(owner, EnzonaReadKind.ACCOUNT, ACCOUNT_RESOURCE, account.json, account.observedAt) })
-    // The public RSA key is read on the first payment, on the coordinator's IO dispatcher.
-    private val encoder by lazy {
+        onAccount = { owner, account -> store.cache(owner, EnzonaReadKind.ACCOUNT, ACCOUNT_RESOURCE, account.json, account.observedAt) },
+        loginHint = loginHint::read)
+    // The public RSA key is read on the first payment or card added, off the main thread.
+    private val cipher by lazy {
         val pem = app.resources.openRawResource(R.raw.enzona_public_key).bufferedReader().use { it.readText() }
-        EnzonaPaymentRequests(EnzonaCipher(EnzonaCipher.publicKeyFromPem(pem)))
+        EnzonaCipher(EnzonaCipher.publicKeyFromPem(pem))
     }
+    private val encoder by lazy { EnzonaPaymentRequests(cipher) }
+    private val cardRequests by lazy { EnzonaCardRequests(cipher) }
     private val payments = EnzonaPaymentCoordinator(session::usableTokens, store, EnzonaPaymentApi(http::execute), { encoder })
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     val repository = EnzonaRepository(session, sessionApi, EnzonaReadApi(http::execute), EnzonaQrApi(http::execute),
-        EnzonaServiceApi(http::execute), payments, store, WorkManagerCreditScheduler(app),
-        CoroutineScope(SupervisorJob() + Dispatchers.Default), EnzonaLoginWeb::clearWebSession)
+        EnzonaServiceApi(http::execute), EnzonaCardsApi(http::execute), { cardRequests }, payments, store, WorkManagerCreditScheduler(app), scope,
+        // Signing out forgets the web sign-in: ENZONA's cookies and the email offered to its page.
+        clearWebSession = {
+            loginHint.save(null)
+            EnzonaLoginWeb.clearWebSession()
+        },
+    )
+
+    init {
+        // The signed-in account's email stays for the next sign-in, also after ENZONA ends the session.
+        scope.launch { repository.account.collect { account -> account?.email?.let(loginHint::save) } }
+    }
 
     companion object {
         @Volatile private var instance: EnzonaDataGraph? = null

@@ -1,35 +1,40 @@
 package dev.duardo.neotransfer.plus.ui.common
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.NeoBottomSheet
-import dev.duardo.neotransfer.plus.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
+import dev.duardo.neotransfer.plus.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
 import dev.duardo.neotransfer.plus.ui.model.CardUi
 import dev.duardo.neotransfer.plus.ui.model.WalletCardUi
 
 /**
- * One of the user's cards as a field: art, number and a detail line. With several cards it opens a sheet to change
- * it. Used wherever a card is chosen, so choosing looks the same everywhere.
+ * One of the user's cards as a field, framed like one under its [label]: art, number and a detail line. With several
+ * cards it opens a sheet to change it. Used wherever a card is chosen, so choosing looks the same everywhere.
  */
 @Composable
 fun CardPicker(
@@ -38,23 +43,28 @@ fun CardPicker(
     onSelect: (Int) -> Unit,
     sheetTitle: String,
     detail: (Int) -> String,
+    label: String,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
     val current = cards[selected]
     val several = cards.size > 1
-    NeoGroup(modifier) {
-        NeoRow(
-            current.numberLine,
-            fitTitle = true,
-            supporting = detail(selected),
-            leading = { CardThumb(current, width = 52.dp) },
-            trailing = if (several) ({ Icon(painterResource(Ds.drawable.ic_expand_more), "Cambiar tarjeta", tint = MaterialTheme.colorScheme.onSurfaceVariant) }) else null,
-            onClick = if (several) ({ open = true }) else null,
-        )
+    val shape = RoundedCornerShape(NeoRadius.field)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.fillMaxWidth().clip(shape).background(Neo.colors.group).border(1.dp, Neo.colors.divider, shape)) {
+            NeoRow(
+                current.numberLine,
+                fitTitle = true,
+                supporting = detail(selected),
+                leading = { CardThumb(current, width = 52.dp) },
+                trailing = if (several) ({ Icon(painterResource(Ds.drawable.ic_expand_more), "Cambiar tarjeta", tint = MaterialTheme.colorScheme.onSurfaceVariant) }) else null,
+                onClick = if (several) ({ open = true }) else null,
+            )
+        }
     }
     if (open) NeoBottomSheet(onDismissRequest = { open = false }, title = sheetTitle) {
-        Column(Modifier.padding(horizontal = NeoSpace.s)) {
+        Column(Modifier.padding(horizontal = NeoSpace.xs)) {
             cards.forEachIndexed { index, card ->
                 NeoRow(
                     card.numberLine,
@@ -69,15 +79,15 @@ fun CardPicker(
     }
 }
 
-/** Card that pays, with its balance. */
+/** Card that pays, «Desde», with its balance. */
 @Composable
 fun SourceCardPicker(cards: List<WalletCardUi>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    CardPicker(cards.map { it.card }, selected, onSelect, "Pagar desde", { cards[it].balanceLine() }, modifier)
+    CardPicker(cards.map { it.card }, selected, onSelect, "Pagar desde", { cards[it].balanceLine() }, "Desde", modifier)
 }
 
 fun WalletCardUi.balanceLine(): String = when (val b = balance) {
     is BalanceUi.Known -> "${card.bank} · Saldo ${formatMoney(b.money.amount, b.money.currency)}"
-    BalanceUi.Unknown -> "${card.bank} · ${card.currency}"
+    BalanceUi.Unknown -> "${card.bank} · ${card.currency.uppercase()}"
 }
 
 /** The screen's main action, pinned above the navigation bar. */

@@ -47,8 +47,8 @@ class RoomEnzonaStoreTest {
         val winners = (1..8).map { async(Dispatchers.IO) { store.tryBeginSubmission(owner, prepared.id) } }.awaitAll()
         assertEquals(1, winners.count { it })
         assertFalse(store.tryBeginSubmission(owner, prepared.id))
-        assertTrue(store.markTimedOut(owner, prepared.id))
-        assertFalse(store.markTimedOut(owner, prepared.id))
+        assertTrue(store.markUnknown(owner, prepared.id))
+        assertFalse(store.markUnknown(owner, prepared.id))
         assertFalse(store.tryBeginSubmission(owner, prepared.id)) // UNKNOWN never becomes sendable again
         assertTrue(store.recordResult(owner, prepared.id, EnzonaIntentState.CONFIRMED, "remote-1"))
         assertFalse(store.recordResult(owner, prepared.id, EnzonaIntentState.REJECTED, null))

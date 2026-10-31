@@ -1,6 +1,10 @@
 package dev.duardo.neotransfer.plus.data
 
 import dev.duardo.neotransfer.plus.core.auth.EnzonaTokens
+import dev.duardo.neotransfer.plus.core.card.CardBank
+import dev.duardo.neotransfer.plus.core.card.EnzonaBanks
+import dev.duardo.neotransfer.plus.core.card.EnzonaCardRequests
+import dev.duardo.neotransfer.plus.core.card.EnzonaCoordinates
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentDraft
 import dev.duardo.neotransfer.plus.core.qr.EnzonaOwnQr
@@ -20,12 +24,17 @@ import dev.duardo.neotransfer.plus.core.service.EnzonaInvoiceService
 import dev.duardo.neotransfer.plus.core.service.EnzonaServiceException
 import dev.duardo.neotransfer.plus.core.service.EnzonaServiceFault
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaApiException
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaCardsApi
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaJournalEntry
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaLog
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaNotDeliveredException
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentCoordinator
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentUpdate
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaQrApi
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaReadApi
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaReconciliation
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaReconciliationChange
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaServiceApi
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSession
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionApi
@@ -38,13 +47,19 @@ import dev.duardo.neotransfer.plus.data.enzona.db.ACCOUNT_RESOURCE
 import dev.duardo.neotransfer.plus.data.enzona.db.CARDS_RESOURCE
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaReadKind
 import dev.duardo.neotransfer.plus.data.enzona.db.validateCardLink
+import dev.duardo.neotransfer.plus.data.enzona.draft
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.math.BigDecimal
+import java.security.interfaces.RSAPublicKey
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -52,12 +67,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** Why a read failed. The UI owns the wording. */
 enum class EnzonaFailure {
@@ -71,6 +88,8 @@ enum class EnzonaFailure {
     INVALID_RESPONSE,
     /** The caller's input cannot be sent (for example, a QR outside the 01/05/07 families). */
     INVALID_INPUT,
+    /** This phone failed (local storage or an unexpected state); ENZONA is not implicated. */
+    LOCAL,
 }
 
 sealed interface EnzonaResult<out T> {
@@ -89,6 +108,17 @@ data class EnzonaWalletCard(
     override fun toString(): String = "EnzonaWalletCard(redacted)"
 }
 
+/** The holder ENZONA takes for a card added to the account: the account's name and last names (0x9e7bb4). */
+val EnzonaAccount.cardholder: String get() = listOfNotNull(name, lastName).filter(String::isNotBlank).joinToString(" ")
+
+/**
+ * What adding a card asks before its secrets: the [coordinates] ENZONA names for this attempt and the key of the
+ * card's bank from ENZONA's catalogue. Asking again names other cells.
+ */
+class EnzonaCardChallenge internal constructor(val coordinates: EnzonaCoordinates, internal val bankKey: RSAPublicKey) {
+    override fun toString(): String = "EnzonaCardChallenge(redacted)"
+}
+
 /** Periodic credit check (~15 min, with network) for the signed-in owner. */
 internal interface EnzonaCreditScheduler {
     fun schedule()
@@ -98,7 +128,8 @@ internal interface EnzonaCreditScheduler {
 /**
  * Facade for the future UI. Flows follow the signed-in owner and come from the Room cache, so screens
  * render offline; [refresh] on open and on pull-to-refresh updates them. Money goes through
- * [preparePayment] → UI review + biometrics → [submitPayment], one send per reviewed intent.
+ * [preparePayment] → UI review + biometrics → [submitPayment], one send per reviewed intent. Every history read
+ * reconciles the unconfirmed ones ([EnzonaReconciliation]).
  *
  * Incoming-credit notices are a durable queue: collect [creditNotices] from `Application.onCreate`
  * (it also runs when WorkManager starts the process), post "contacto e importe", then call
@@ -111,12 +142,19 @@ class EnzonaRepository internal constructor(
     private val reads: EnzonaReadApi,
     private val qr: EnzonaQrApi,
     private val services: EnzonaServiceApi,
+    private val accountCards: EnzonaCardsApi,
+    /** Built on first use: it reads ENZONA's public key. */
+    private val cardRequests: () -> EnzonaCardRequests,
     private val payments: EnzonaPaymentCoordinator,
     private val store: EnzonaLocalStore,
     private val scheduler: EnzonaCreditScheduler,
     private val scope: CoroutineScope,
     private val clearWebSession: suspend () -> Unit,
     private val today: () -> LocalDate = { LocalDate.now() },
+    private val zone: ZoneId = ZoneId.systemDefault(),
+    private val now: () -> Long = { Instant.now().toEpochMilli() },
+    /** An unconfirmed payment reads the history again right away and once more after this long. */
+    private val recheckMillis: Long = 5 * 60_000L,
 ) {
     private val syncMutex = Mutex()
     private val mutableRefreshing = MutableStateFlow(false)
@@ -155,7 +193,7 @@ class EnzonaRepository internal constructor(
         }
     }
 
-    /** Local money attempts. UNKNOWN is "Sin confirmar": reconcile with [transactions], never resend. */
+    /** Local money attempts. UNKNOWN is "Sin confirmar": reconciled with [transactions] on every read, never resent. */
     val journal: Flow<List<EnzonaJournalEntry>> = owner.flatMapLatest { owner ->
         if (owner == null) flowOf(emptyList()) else store.observeJournal(owner)
     }
@@ -204,39 +242,40 @@ class EnzonaRepository internal constructor(
     suspend fun refresh(): EnzonaFailure? = syncMutex.withLock {
         mutableRefreshing.value = true
         try {
-            withTokens(retryRejectedToken = true) { owner, tokens ->
+            withTokens("refresh", retryRejectedToken = true) { owner, tokens ->
                 var failure: EnzonaFailure? = null
-                suspend fun step(block: suspend () -> Unit) {
+                suspend fun step(op: String, block: suspend () -> Unit) {
                     try { block() }
                     catch (cancelled: CancellationException) { throw cancelled }
                     // A rejected token restarts the whole read once with renewed tokens.
-                    catch (rejected: EnzonaApiException) { if (rejected.invalidCredentials) throw rejected; failure = failure ?: failureOf(rejected) }
-                    catch (other: Exception) { failure = failure ?: failureOf(other) }
+                    catch (rejected: EnzonaApiException) { if (rejected.invalidCredentials) throw rejected; failed(op, rejected).let { failure = failure ?: it } }
+                    catch (other: Exception) { failed(op, other).let { failure = failure ?: it } }
                 }
                 var account: EnzonaAccount? = null
-                step { account = ensureAccount(owner, tokens) }
+                step("refresh.account") { account = ensureAccount(owner, tokens) }
                 var cards = emptyList<EnzonaRemoteCard>()
-                step {
+                step("refresh.cards") {
                     val fetched = reads.cards(tokens)
                     store.cache(owner, EnzonaReadKind.CARDS, CARDS_RESOURCE, fetched.json, fetched.observedAt)
                     cards = fetched.value
                 }
-                for (card in cards) step { cacheBalance(owner, tokens, card.fundingSourceUuid) }
-                step { syncRecentHistory(owner, tokens, account?.username) }
+                for (card in cards) step("refresh.balance") { cacheBalance(owner, tokens, card.fundingSourceUuid) }
+                step("refresh.history") { syncRecentHistory(owner, tokens, account?.username) }
                 failure
             }.let { if (it is EnzonaResult.Ok) it.value else (it as EnzonaResult.Failed).reason }
         } finally { mutableRefreshing.value = false }
     }
 
     suspend fun refreshBalance(cardUuid: String): EnzonaFailure? =
-        withTokens(retryRejectedToken = true) { owner, tokens -> cacheBalance(owner, tokens, cardUuid) }.failure()
+        withTokens("balance", retryRejectedToken = true) { owner, tokens -> cacheBalance(owner, tokens, cardUuid) }.failure()
 
     /** Older history for the activity screen. Never notifies: these credits are not new. */
     suspend fun loadHistory(from: LocalDate, through: LocalDate): EnzonaFailure? {
         if (from.isAfter(through)) return EnzonaFailure.INVALID_INPUT
-        return withTokens(retryRejectedToken = true) { owner, tokens ->
+        return withTokens("history.older", retryRejectedToken = true) { owner, tokens ->
             val page = reads.transactions(tokens, from, through)
             store.saveHistory(owner, page.value.transactions, page.observedAt, notifyCredits = false, accountUsername = null)
+            reconcile(owner, from..through, page.observedAt)
         }.failure()
     }
 
@@ -264,7 +303,7 @@ class EnzonaRepository internal constructor(
     suspend fun syncCredits(): EnzonaFailure? = syncMutex.withLock {
         session.restore()
         if (!session.state.value.signedIn) return@withLock null
-        withTokens(retryRejectedToken = true) { owner, tokens ->
+        withTokens("credits", retryRejectedToken = true) { owner, tokens ->
             syncRecentHistory(owner, tokens, ensureAccount(owner, tokens)?.username)
         }.failure()
     }
@@ -274,25 +313,72 @@ class EnzonaRepository internal constructor(
     /** Information for review only; resolving never pays or prepares a payment. */
     suspend fun resolveQr(code: String): EnzonaResult<EnzonaResolvedQr> {
         if (!EnzonaQrCode.isCandidate(code)) return EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
-        return withTokens(retryRejectedToken = true) { owner, tokens -> qr.resolve(tokens, owner, code) }
+        return withTokens("qr.resolve", retryRejectedToken = true) { owner, tokens -> qr.resolve(tokens, owner, code) }
     }
 
-    /** A server-issued receive code (POST, not repeated on a rejected token). */
-    suspend fun createOwnQr(amount: BigDecimal, currency: String, description: String?): EnzonaResult<EnzonaOwnQr> {
-        if (amount.signum() <= 0 || currency.isBlank()) return EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
-        return withTokens(retryRejectedToken = false) { owner, tokens -> qr.createOwn(tokens, owner, amount, currency, description) }
+    /** A server-issued receive code (POST, not repeated on a rejected token); without [amount], the payer types it. */
+    suspend fun createOwnQr(amount: BigDecimal?, currency: String, description: String?): EnzonaResult<EnzonaOwnQr> {
+        if (amount != null && amount.signum() <= 0 || currency.isBlank()) return EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
+        return withTokens("qr.create", retryRejectedToken = false) { owner, tokens -> qr.createOwn(tokens, owner, amount, currency, description) }
     }
 
     suspend fun electricityBills(clientId: String): EnzonaResult<List<EnzonaElectricityBill>> {
         if (clientId.isBlank()) return EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
-        return withTokens(retryRejectedToken = true) { _, tokens -> services.electricityBills(tokens, clientId.trim()).value }
+        return withTokens("bills.electricity", retryRejectedToken = true) { _, tokens -> services.electricityBills(tokens, clientId.trim()).value }
     }
 
     /** Fixed phone, Nauta or Nauta Hogar. Pass the full identifier (Nauta suffix included). */
     suspend fun etecsaAccounts(service: EnzonaInvoiceService, clientId: String): EnzonaResult<EnzonaEtecsaQuery> {
         if (service == EnzonaInvoiceService.ELECTRICITY || clientId.isBlank()) return EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
-        return withTokens(retryRejectedToken = true) { _, tokens -> services.etecsaAccounts(tokens, service, clientId.trim()).value }
+        return withTokens("bills.etecsa", retryRejectedToken = true) { _, tokens -> services.etecsaAccounts(tokens, service, clientId.trim()).value }
     }
+
+    // Cards of the account --------------------------------------------------------------------------
+
+    /** The cells for adding a card of [bank]; null when ENZONA's catalogue names no single bank as [bank]. */
+    suspend fun cardChallenge(bank: CardBank): EnzonaResult<EnzonaCardChallenge?> =
+        withTokens("cards.challenge", retryRejectedToken = true) { _, tokens ->
+            val listed = EnzonaBanks.find(accountCards.banks(tokens), bank) ?: return@withTokens null
+            val key = EnzonaCardRequests.bankKey(requireNotNull(listed.certificate) { "ENZONA bank without certificate" })
+            EnzonaCardChallenge(accountCards.coordinates(tokens), key)
+        }
+
+    /**
+     * Adds [pan] (expiry `MMAA`) to the account with [answers], what was typed for [challenge]'s cells in their order;
+     * they are cleared on every path. One POST, never repeated: a rejected token only renews for a later attempt.
+     * The holder is the account's name and last names.
+     */
+    suspend fun addCard(pan: String, expiry: String, challenge: EnzonaCardChallenge, answers: List<CharArray>): EnzonaResult<Unit> = try {
+        val valid = pan.length == 16 && expiry.length == 4 && (pan + expiry).all { it in '0'..'9' } &&
+            answers.size == challenge.coordinates.labels.size && answers.all { typed -> typed.isNotEmpty() && typed.all { it in '0'..'9' } }
+        if (!valid) EnzonaResult.Failed(EnzonaFailure.INVALID_INPUT)
+        else withTokens("cards.add", retryRejectedToken = false) { owner, tokens ->
+            val holder = ensureAccount(owner, tokens)?.cardholder.orEmpty()
+            val request = withContext(Dispatchers.Default) {
+                cardRequests().add(pan, expiry, holder, tokens.accountSubject(), challenge.coordinates, challenge.bankKey, answers)
+            }
+            accountCards.add(tokens, request)
+            reloadCards("cards.add", owner, tokens)
+        }
+    } finally {
+        answers.forEach { it.fill('\u0000') }
+    }
+
+    /** Makes [cardUuid] the card ENZONA uses by default. */
+    suspend fun setDefaultCard(cardUuid: String): EnzonaResult<Unit> =
+        withTokens("cards.default", retryRejectedToken = false) { owner, tokens ->
+            accountCards.setDefault(tokens, cardUuid)
+            reloadCards("cards.default", owner, tokens)
+        }
+
+    /** Takes [cardUuid] out of the account, and its full number, alias and balance off this phone. */
+    suspend fun removeCard(cardUuid: String): EnzonaResult<Unit> =
+        withTokens("cards.remove", retryRejectedToken = false) { owner, tokens ->
+            accountCards.remove(tokens, cardUuid)
+            reloadCards("cards.remove", owner, tokens)
+            try { store.forgetCard(owner, cardUuid) }
+            catch (cancelled: CancellationException) { throw cancelled } catch (failure: Exception) { failed("cards.remove.forget", failure) }
+        }
 
     // Money ----------------------------------------------------------------------------------------
 
@@ -305,22 +391,52 @@ class EnzonaRepository internal constructor(
     /**
      * One send for this reviewed [intent], consuming [password]. [canDispatch] must stay true only while
      * the biometric approval of exactly this review is current (see EnzonaPaymentApproval). A confirmed
-     * payment refreshes the source balance and recent history in the background.
+     * payment refreshes the source balance and recent history in the background; an unconfirmed one does it at once
+     * and again after [recheckMillis] while it stays unconfirmed (the app does it also on every return).
      */
     suspend fun submitPayment(intent: EnzonaIntent, password: CharArray, canDispatch: () -> Boolean): EnzonaPaymentUpdate {
         val update = payments.submit(intent, password, canDispatch)
-        if (update.state == EnzonaIntentState.CONFIRMED) scope.launch {
-            refreshBalance(intent.cardUuid)
-            syncMutex.withLock {
-                withTokens(retryRejectedToken = true) { owner, tokens -> syncRecentHistory(owner, tokens, cachedAccount(owner)?.username) }
+        when (update.state) {
+            EnzonaIntentState.CONFIRMED -> scope.launch { recheck(intent) }
+            EnzonaIntentState.UNKNOWN -> scope.launch {
+                recheck(intent)
+                delay(recheckMillis)
+                if (store.intent(intent.ownerSubject, intent.id)?.state == EnzonaIntentState.UNKNOWN) recheck(intent)
             }
+            else -> Unit
         }
         return update
     }
 
+    /** A new reviewed intent with the values of [intent], which never reached ENZONA. It needs its own approval. */
+    suspend fun prepareAgain(intent: EnzonaIntent): EnzonaIntent {
+        val stored = store.intent(intent.ownerSubject, intent.id)
+        require(stored?.intent == intent && stored.state == EnzonaIntentState.NOT_DELIVERED) { "Solo un pago que no llegó a ENZONA" }
+        return preparePayment(intent.draft())
+    }
+
+    /**
+     * The person says [intentId], unconfirmed, did not happen: allowed once a history read made at least a day after it
+     * covered its time and had no row for it. It stays UNKNOWN underneath, and a row that appears later undoes the mark.
+     */
+    suspend fun markNotDone(intentId: String): Boolean {
+        val owner = session.state.value.ownerSubject ?: return false
+        return try { store.markNotDone(owner, intentId, now()) } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { failed("payment.not_done", failure); false }
+    }
+
+    private suspend fun recheck(intent: EnzonaIntent) {
+        refreshBalance(intent.cardUuid)
+        syncMutex.withLock {
+            withTokens("payment.history", retryRejectedToken = true) { owner, tokens -> syncRecentHistory(owner, tokens, cachedAccount(owner)?.username) }
+        }
+    }
+
     // Internals ------------------------------------------------------------------------------------
 
-    private suspend fun <T> withTokens(retryRejectedToken: Boolean, block: suspend (owner: String, tokens: EnzonaTokens) -> T): EnzonaResult<T> =
+    /** [op] names the read in the diagnostic line of a failure. */
+    private suspend fun <T> withTokens(op: String, retryRejectedToken: Boolean,
+        block: suspend (owner: String, tokens: EnzonaTokens) -> T): EnzonaResult<T> =
         try {
             val tokens = session.usableTokens()
             val owner = tokens.accountSubject()
@@ -337,8 +453,13 @@ class EnzonaRepository internal constructor(
             }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) {
-            EnzonaResult.Failed(failureOf(failure), (failure as? EnzonaServiceException)?.fault)
+            EnzonaResult.Failed(failed(op, failure), (failure as? EnzonaServiceException)?.fault)
         }
+
+    /** What [failure] means for the person, logged with the read that failed. */
+    private fun failed(op: String, failure: Exception): EnzonaFailure = failureOf(failure).also {
+        EnzonaLog.warn("read failed: op=$op type=$it error=${EnzonaLog.error(failure)}${EnzonaLog.reply(failure)}")
+    }
 
     private suspend fun cachedAccount(owner: String): EnzonaAccount? =
         store.cached(owner, EnzonaReadKind.ACCOUNT, ACCOUNT_RESOURCE)?.let { row -> decoded { EnzonaReadJson.account(row.json) } }
@@ -350,6 +471,14 @@ class EnzonaRepository internal constructor(
         return fetched.value
     }
 
+    /** The card list after a change ENZONA accepted. A failed read is logged; the change stands. */
+    private suspend fun reloadCards(op: String, owner: String, tokens: EnzonaTokens) {
+        try {
+            val fetched = reads.cards(tokens)
+            store.cache(owner, EnzonaReadKind.CARDS, CARDS_RESOURCE, fetched.json, fetched.observedAt)
+        } catch (cancelled: CancellationException) { throw cancelled } catch (failure: Exception) { failed("$op.reload", failure) }
+    }
+
     private suspend fun cacheBalance(owner: String, tokens: EnzonaTokens, cardUuid: String) {
         val fetched = reads.balance(tokens, cardUuid)
         store.cache(owner, EnzonaReadKind.BALANCE, cardUuid, fetched.json, fetched.observedAt)
@@ -358,21 +487,47 @@ class EnzonaRepository internal constructor(
     /** The APK's main history window: today − 7 days through today. */
     private suspend fun syncRecentHistory(owner: String, tokens: EnzonaTokens, accountUsername: String?) {
         val through = today()
-        val page = reads.transactions(tokens, through.minusDays(7), through)
+        val from = through.minusDays(7)
+        val page = reads.transactions(tokens, from, through)
         store.saveHistory(owner, page.value.transactions, page.observedAt, notifyCredits = true, accountUsername = accountUsername)
+        reconcile(owner, from..through, page.observedAt)
     }
 
+    /** What the stored history says of the owner's UNKNOWN payments after a read of [read]. A failure here fails no read. */
+    private suspend fun reconcile(owner: String, read: ClosedRange<LocalDate>, observedAt: Long) {
+        try {
+            val journal = store.observeJournal(owner).first()
+            if (journal.none { it.state == EnzonaIntentState.UNKNOWN }) return
+            val history = store.observeTransactions(owner).first().mapNotNull { row -> decoded { EnzonaReadJson.transaction(row.json) } }
+            val ownLast4 = store.cached(owner, EnzonaReadKind.CARDS, CARDS_RESOURCE)?.let { row -> decoded { EnzonaReadJson.cards(row.json) } }
+                .orEmpty().mapNotNull { card -> card.last4?.let { card.fundingSourceUuid to it } }.toMap()
+            val changes = EnzonaReconciliation.plan(journal, history, ownLast4, zone, read, observedAt)
+            if (changes.isEmpty()) return
+            store.reconcile(owner, changes)
+            changes.filterIsInstance<EnzonaReconciliationChange.Settle>().forEach {
+                EnzonaLog.info("payment reconciled: ${it.state} by=${it.matchedBy.name.lowercase()}")
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { EnzonaLog.warn("payment reconciliation failed: error=${EnzonaLog.error(failure)}") }
+    }
+
+    /** NETWORK only for a connection that failed; anything this phone failed at is LOCAL. */
     private fun failureOf(failure: Exception): EnzonaFailure = when (failure) {
         is EnzonaSessionUnavailableException -> when (failure.failure) {
-            EnzonaSessionFailure.SIGN_IN_AGAIN, EnzonaSessionFailure.RESTORE_FAILED -> EnzonaFailure.SIGNED_OUT
-            EnzonaSessionFailure.CLIENT_REJECTED, EnzonaSessionFailure.ACCESS_DENIED, EnzonaSessionFailure.SERVER_ERROR -> EnzonaFailure.REJECTED
-            else -> EnzonaFailure.NETWORK
+            EnzonaSessionFailure.SIGN_IN_AGAIN, EnzonaSessionFailure.RESTORE_FAILED, EnzonaSessionFailure.LOCAL_CLEAR_FAILED -> EnzonaFailure.SIGNED_OUT
+            EnzonaSessionFailure.CLIENT_REJECTED, EnzonaSessionFailure.ACCESS_DENIED, EnzonaSessionFailure.SERVER_ERROR,
+            EnzonaSessionFailure.CALLBACK_REJECTED -> EnzonaFailure.REJECTED
+            EnzonaSessionFailure.TIMEOUT -> EnzonaFailure.TIMEOUT
+            EnzonaSessionFailure.UNAVAILABLE -> EnzonaFailure.NETWORK
+            EnzonaSessionFailure.LOCAL_SAVE_FAILED -> EnzonaFailure.LOCAL
         }
+        // The request did not leave the phone: no connection, or none in time.
+        is EnzonaNotDeliveredException -> if (failure.cause is InterruptedIOException) EnzonaFailure.TIMEOUT else EnzonaFailure.NETWORK
         is InterruptedIOException -> EnzonaFailure.TIMEOUT
         is EnzonaApiException, is EnzonaServiceException -> EnzonaFailure.REJECTED
         is IOException -> EnzonaFailure.NETWORK
         is EnzonaQrResponseException, is IllegalArgumentException -> EnzonaFailure.INVALID_RESPONSE
-        else -> EnzonaFailure.NETWORK
+        else -> EnzonaFailure.LOCAL
     }
 
     private fun EnzonaResult<*>.failure(): EnzonaFailure? = (this as? EnzonaResult.Failed)?.reason

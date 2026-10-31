@@ -1,23 +1,25 @@
 package dev.duardo.neotransfer.plus.platform
 
-import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
-import dev.duardo.neotransfer.plus.data.contacts.Contact
+import dev.duardo.neotransfer.plus.core.phone.Phones
+import dev.duardo.neotransfer.plus.data.contacts.PhoneBook
+import dev.duardo.neotransfer.plus.data.contacts.PhoneContact
 import java.io.File
-import java.util.UUID
 
 /** Share sheet with plain text (receipts, receive codes). */
 fun Context.shareText(text: String, title: String) {
@@ -39,39 +41,69 @@ fun Context.openNotificationSettings() {
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
-/** `5xxxxxxx`, with `+53`, `53` or `0053` tolerated; anything else (landlines, foreign numbers) is not a mobile. */
-fun cubanMobile(raw: String): String? {
-    if (raw.isBlank() || raw.any { !it.isDigit() && it !in "+ -()." }) return null
-    val digits = raw.filter(Char::isDigit)
-    val local = when {
-        digits.length == 8 -> digits
-        digits.length == 10 && digits.startsWith("53") -> digits.drop(2)
-        digits.length == 12 && digits.startsWith("0053") -> digits.drop(4)
-        else -> return null
-    }
-    return local.takeIf { it[0] == '5' }
+/** The app's page in the system settings: where a permission refused for good is given. */
+fun Context.openAppSettings() {
+    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
-/**
- * Reads only the contact the user picked (`ACTION_PICK` on Contacts): name and Cuban mobiles. Needs READ_CONTACTS for
- * the phones; without it the name alone comes in. Call off the main thread.
- */
-fun Context.readPickedContact(uri: Uri): Contact {
-    require(uri.scheme == "content" && uri.authority == ContactsContract.AUTHORITY) { "El contacto elegido no es válido" }
-    val (id, name) = checkNotNull(contentResolver.query(uri, arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME_PRIMARY), null, null, null)) {
-        "No se pudo leer el contacto"
-    }.use { cursor ->
-        require(cursor.moveToFirst()) { "El contacto ya no está disponible" }
-        cursor.getLong(0) to cursor.getString(1)?.trim().orEmpty()
+/** The person in the phone's Contacts app, to change their name or phones; it comes back here once saved. */
+fun Context.editInContacts(lookupKey: String) {
+    startActivity(
+        Intent(Intent.ACTION_EDIT, Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, Uri.encode(lookupKey)))
+            .putExtra("finishActivityOnSaveCompleted", true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
+}
+
+// ---- Running with the app closed ----------------------------------------------------------------------------
+
+/** Whether battery optimization leaves the periodic check alone. */
+fun Context.ignoresBatteryOptimizations(): Boolean =
+    getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+
+/** The system dialog that exempts this app from battery optimization (BatteryLife is a Google Play rule; the app is not on Play). */
+@SuppressLint("BatteryLife")
+fun Context.batteryExemptionRequest(): Intent =
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.fromParts("package", packageName, null))
+
+/** Transsion's "Inicio automático" list, seen on TECNO: without it, its power manager stops WorkManager. */
+private const val TranssionAutostart = "com.cyin.himgr.applicationmanager.view.activities.AUTO_START_ACTIVITY"
+
+/** The phone's own autostart list, when it has one this app knows. Declared in the manifest's `<queries>`. */
+fun Context.autostartSettings(): Intent? = Intent(TranssionAutostart).takeIf { it.resolveActivity(packageManager) != null }
+
+/** Opens [autostartSettings]; false when the phone has none or refuses to open it. */
+fun Context.openAutostartSettings(): Boolean {
+    val intent = autostartSettings() ?: return false
+    return runCatching { startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+}
+
+/** `5xxxxxxx` or `6xxxxxxx`, with `+53`, `53` or `0053` tolerated; anything else (landlines, foreign numbers) is not a mobile. */
+fun cubanMobile(raw: String): String? {
+    if (raw.isBlank() || raw.any { !it.isDigit() && it !in "+ -()." }) return null
+    return Phones.normalize(raw)?.takeIf { it[0] in "56" }
+}
+
+/** The address book through the phones table: one query, grouped by contact; call off the main thread. */
+class AndroidPhoneBook(context: Context) : PhoneBook {
+    private val resolver = context.applicationContext.contentResolver
+
+    override fun read(): List<PhoneContact> {
+        val rows = resolver.query(Phone.CONTENT_URI, arrayOf(Phone.LOOKUP_KEY, Phone.CONTACT_ID, Phone.DISPLAY_NAME_PRIMARY, Phone.NUMBER),
+            null, null, null) ?: return emptyList()
+        val people = linkedMapOf<String, PhoneContact>()
+        rows.use { cursor ->
+            while (cursor.moveToNext()) {
+                val phone = cursor.getString(3)?.let(::cubanMobile) ?: continue
+                val name = cursor.getString(2)?.trim()?.takeIf(String::isNotEmpty) ?: continue
+                val key = cursor.getString(0)?.takeIf(String::isNotBlank) ?: "id-${cursor.getLong(1)}"
+                val known = people[key]
+                people[key] = if (known == null) PhoneContact(key, name, listOf(phone)) else known.copy(phones = (known.phones + phone).distinct())
+            }
+        }
+        return people.values.toList()
     }
-    require(name.isNotEmpty()) { "El contacto no tiene nombre" }
-    val phones = if (checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
-        checkNotNull(contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
-            "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?", arrayOf(id.toString()), null)) { "No se pudieron leer los teléfonos" }
-            .use { cursor -> buildList { while (cursor.moveToNext()) cursor.getString(0)?.let(::add) } }
-            .mapNotNull(::cubanMobile).distinct()
-    } else emptyList()
-    return Contact(UUID.randomUUID().toString(), name, emptyList(), phones)
 }
 
 /** Shares the receive QR as an image (white plate, dark modules) with [caption] as its text. */

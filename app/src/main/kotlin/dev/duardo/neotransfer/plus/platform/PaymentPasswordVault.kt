@@ -18,19 +18,39 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The ENZONA payment password, AES-GCM under a Keystore key that needs a strong biometric on every use and dies
- * when a new fingerprint is enrolled. Ciphers are authorized with `BiometricPrompt.CryptoObject` before [save] or
- * [open]. Outside Android backup (the app disables it) and never exported.
+ * when a new fingerprint is enrolled. Ciphers are authorized with `BiometricPrompt.CryptoObject` before [seal] or
+ * [open]. A typed password is sealed when its payment is approved and [store]d only once ENZONA confirmed that
+ * payment. Outside Android backup (the app disables it) and never exported.
  */
 class PaymentPasswordVault(context: Context) {
     private val preferences = context.getSharedPreferences("payment_password", Context.MODE_PRIVATE)
     private val keyStore by lazy { KeyStore.getInstance("AndroidKeyStore").apply { load(null) } }
     private val mutableSaved = MutableStateFlow(preferences.contains(CIPHERTEXT) && preferences.contains(IV))
     val saved: StateFlow<Boolean> = mutableSaved.asStateFlow()
+    // A password saved before payments confirmed it (no [CHECKED]) was never accepted by ENZONA: it is in doubt too.
+    private val mutableUnverified = MutableStateFlow(preferences.getBoolean(UNVERIFIED, false) || (mutableSaved.value && !preferences.contains(CHECKED)))
+    /** ENZONA answered the last payment made with a password without confirming it: the next one asks for it again. */
+    val unverified: StateFlow<Boolean> = mutableUnverified.asStateFlow()
+
+    /** The password encrypted under this phone's key and not stored yet. Not secret without the key, kept only in memory. */
+    class Sealed internal constructor(internal val ciphertext: String, internal val iv: String) {
+        override fun toString() = "Sealed(redacted)"
+    }
 
     fun clear() {
-        check(preferences.edit().clear().commit()) { "No se pudo borrar la contraseña" }
+        check(preferences.edit().clear().commit()) { "No se pudo borrar el PIN" }
         if (keyStore.containsAlias(KEY_ALIAS)) keyStore.deleteEntry(KEY_ALIAS)
         mutableSaved.value = false
+        mutableUnverified.value = false
+    }
+
+    fun markUnverified() {
+        if (preferences.edit().putBoolean(UNVERIFIED, true).commit()) mutableUnverified.value = true
+    }
+
+    /** ENZONA confirmed a payment made with the saved password. */
+    fun markVerified() {
+        if (mutableUnverified.value && preferences.edit().remove(UNVERIFIED).putBoolean(CHECKED, true).commit()) mutableUnverified.value = false
     }
 
     fun encryptCipher(): Cipher {
@@ -55,17 +75,25 @@ class PaymentPasswordVault(context: Context) {
         }
     }
 
-    /** Stores [password] and zeroes the bytes it used; the caller still owns (and zeroes) [password]. */
-    fun save(authorized: Cipher, password: CharArray) {
+    /** Stores [password] at once (Ajustes) and zeroes the bytes it used; the caller still owns (and zeroes) [password]. */
+    fun save(authorized: Cipher, password: CharArray) = store(seal(authorized, password))
+
+    /** Encrypts [password] without storing it and zeroes the bytes it used; the caller still owns (and zeroes) [password]. */
+    fun seal(authorized: Cipher, password: CharArray): Sealed {
         val bytes = utf8(password)
         try {
             val encrypted = authorized.doFinal(bytes)
-            check(preferences.edit()
-                .putString(CIPHERTEXT, Base64.encodeToString(encrypted, Base64.NO_WRAP))
-                .putString(IV, Base64.encodeToString(authorized.iv, Base64.NO_WRAP))
-                .commit()) { "No se pudo guardar la contraseña" }
-            mutableSaved.value = true
+            return Sealed(Base64.encodeToString(encrypted, Base64.NO_WRAP), Base64.encodeToString(authorized.iv, Base64.NO_WRAP))
         } finally { bytes.fill(0) }
+    }
+
+    /** Makes [sealed] the saved password, no longer in doubt. */
+    fun store(sealed: Sealed) {
+        check(preferences.edit().putString(CIPHERTEXT, sealed.ciphertext).putString(IV, sealed.iv).remove(UNVERIFIED).putBoolean(CHECKED, true).commit()) {
+            "No se pudo guardar el PIN"
+        }
+        mutableSaved.value = true
+        mutableUnverified.value = false
     }
 
     /** Null when a new fingerprint invalidated the key: the password is gone and must be typed again. */
@@ -99,5 +127,7 @@ class PaymentPasswordVault(context: Context) {
         const val KEY_ALIAS = "dev.duardo.neotransfer.plus.payment-password"
         const val CIPHERTEXT = "ciphertext"
         const val IV = "iv"
+        const val UNVERIFIED = "unverified"
+        const val CHECKED = "checked"
     }
 }

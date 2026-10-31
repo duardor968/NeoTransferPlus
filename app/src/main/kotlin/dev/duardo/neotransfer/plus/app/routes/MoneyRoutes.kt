@@ -17,6 +17,7 @@ import dev.duardo.neotransfer.plus.app.LocalAuthorizer
 import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.Authorizer
 import dev.duardo.neotransfer.plus.app.ownerOf
+import dev.duardo.neotransfer.plus.app.pendingTransfer
 import dev.duardo.neotransfer.plus.app.recentRecipients
 import dev.duardo.neotransfer.plus.app.toUi
 import dev.duardo.neotransfer.plus.core.money.Amounts
@@ -26,6 +27,7 @@ import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentDraft
 import dev.duardo.neotransfer.plus.core.payment.EnzonaQrMerchantPaymentDraft
 import dev.duardo.neotransfer.plus.core.qr.EnzonaQrCode
+import dev.duardo.neotransfer.plus.core.qr.EnzonaOwnQr
 import dev.duardo.neotransfer.plus.core.qr.EnzonaQrKind
 import dev.duardo.neotransfer.plus.core.qr.EnzonaResolvedQr
 import dev.duardo.neotransfer.plus.data.EnzonaFailure
@@ -36,6 +38,7 @@ import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.designsystem.component.KeypadKey
 import dev.duardo.neotransfer.plus.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
+import dev.duardo.neotransfer.plus.platform.copyText
 import dev.duardo.neotransfer.plus.platform.shareQr
 import dev.duardo.neotransfer.plus.scanner.QrVerdict
 import dev.duardo.neotransfer.plus.scanner.ScanMode
@@ -43,7 +46,7 @@ import dev.duardo.neotransfer.plus.scanner.ScanResult
 import dev.duardo.neotransfer.plus.scanner.ScannerView
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
 import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
-import dev.duardo.neotransfer.plus.ui.model.ForeignCardUi
+import dev.duardo.neotransfer.plus.ui.model.DuplicateUi
 import dev.duardo.neotransfer.plus.ui.model.Money
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
@@ -67,6 +70,8 @@ import dev.duardo.neotransfer.plus.ui.transfer.RecipientScreen
 import dev.duardo.neotransfer.plus.ui.transfer.ReviewActions
 import dev.duardo.neotransfer.plus.ui.transfer.TransferAmountScreen
 import dev.duardo.neotransfer.plus.ui.transfer.TransferReviewScreen
+import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -81,7 +86,7 @@ private fun classifyQr(code: String): QrVerdict = when {
 private fun cardRecipient(pan: String, contacts: List<Contact>): RecipientUi.Card {
     val contact = contacts.ownerOf(pan)
     val card = contact?.cards?.first { it.pan == pan }
-    return RecipientUi.Card(ForeignCardUi(card?.id ?: "pan:$pan", pan, Banks.ofPan(pan), card?.label), contact?.name, contact?.id)
+    return RecipientUi.Card(Banks.foreignCard(card?.id ?: "pan:$pan", pan, card?.label), contact?.name, contact?.id)
 }
 
 private fun EnzonaResolvedQr.accountRecipient(): RecipientUi.Account? {
@@ -113,9 +118,9 @@ class Payment(private val plus: PlusApp, private val authorizer: Authorizer) {
                 return@launch
             }
             busy = false
-            authorizer.authorize(title, subtitle, firstTimeAction, onPassword = { password ->
+            authorizer.authorize(title, subtitle, firstTimeAction, onPassword = { password, sealed ->
                 if (name != null) plus.titles.update { it + (intent.id to name) }
-                plus.submit(intent, password)
+                plus.submit(intent, password, sealed)
                 plus.nav.replace(Dest.Result(intent.id))
             }, onProblem = plus::say)
         }
@@ -141,14 +146,16 @@ fun RecipientRoute(plus: PlusApp) {
     val digits = query.filter(Char::isDigit)
     val numberQuery = digits.length == query.count { !it.isWhitespace() } && digits.isNotEmpty()
     val owner = if (digits.length == 16) all.ownerOf(digits) else null
-    val typed = if (numberQuery && digits.length == 16 && luhn(digits) && owner == null) ForeignCardUi("typed", digits, Banks.ofPan(digits)) else null
+    val typed = if (numberQuery && digits.length == 16 && luhn(digits) && owner == null) Banks.foreignCard("typed", digits) else null
     val typedError = if (numberQuery && digits.length == 16 && !luhn(digits)) "Número no válido: revisa los dígitos" else null
-    val withCards = all.filter { it.cards.isNotEmpty() && it.matches(query) }.map(Contact::toUi)
+    // People with a card; while searching by name, the rest of the address book too: their card is asked for when chosen.
+    val shown = all.filter { if (it.cards.isNotEmpty()) it.matches(query) else query.isNotBlank() && !numberQuery && it.matchesName(query) }
+        .sortedBy { it.cards.isEmpty() }.map { it.toUi() }
     val state = RecipientPickUi(
         query, typed, typedError,
         recent = if (query.isEmpty()) recentRecipients(journal.orEmpty(), all) else emptyList(),
-        contacts = withCards,
-        chooseCardOf = chooseCardOf?.let { id -> withCards.firstOrNull { it.id == id } ?: all.firstOrNull { it.id == id }?.toUi() },
+        contacts = shown,
+        chooseCardOf = chooseCardOf?.let { id -> all.firstOrNull { it.id == id }?.toUi() },
     )
 
     fun toCard(pan: String) = plus.nav.push(Dest.Amount(cardRecipient(pan, all)))
@@ -161,7 +168,11 @@ fun RecipientRoute(plus: PlusApp) {
         override fun pick(recipient: RecipientUi.Card) = plus.nav.push(Dest.Amount(recipient))
         override fun pickContact(contactId: String) {
             val contact = all.firstOrNull { it.id == contactId } ?: return
-            if (contact.cards.size == 1) toCard(contact.cards.single().pan) else chooseCardOf = contactId
+            when (contact.cards.size) {
+                0 -> plus.nav.push(Dest.CardEdit(contactId, thenTransfer = true))
+                1 -> toCard(contact.cards.single().pan)
+                else -> chooseCardOf = contactId
+            }
         }
         override fun pickContactCard(contactId: String, cardId: String) {
             chooseCardOf = null
@@ -234,28 +245,49 @@ fun AmountRoute(plus: PlusApp, dest: Dest.Amount) {
 fun ReviewRoute(plus: PlusApp, dest: Dest.Review) {
     val wallet = rememberWallet(plus)
     val payment = rememberPayment(plus)
+    val journal by plus.journal.collectAsState()
+    val transactions by plus.transactions.collectAsState()
+    var duplicate by remember { mutableStateOf<DuplicateUi?>(null) }
     val card = wallet.firstOrNull { it.card.id == dest.cardId }?.card ?: return
     val money = Money(dest.amount, card.currency)
     val recipient = dest.recipient
     val actions = object : ReviewActions {
         override fun back() { plus.nav.back() }
         override fun confirm() {
+            val destination = when (recipient) {
+                is RecipientUi.Card -> recipient.card.number
+                is RecipientUi.Account -> recipient.uuid
+            }
+            val known = transactions.orEmpty().map { it.transactionUuid }.toSet()
+            val pending = pendingTransfer(journal.orEmpty(), known, card.id, destination, dest.amount, card.currency)
+            if (pending == null) send() else duplicate = DuplicateUi(money, recipient.to, Instant.ofEpochMilli(pending.intent.preparedAt))
+        }
+        override fun confirmDuplicate() {
+            duplicate = null
+            send()
+        }
+        override fun cancelDuplicate() { duplicate = null }
+
+        private fun send() {
             val draft = when (recipient) {
                 is RecipientUi.Card -> EnzonaCardTransferDraft(card.id, recipient.card.number, dest.amount, card.currency, dest.description)
                 is RecipientUi.Account -> EnzonaAccountTransferDraft(card.id, recipient.uuid, recipient.username, dest.amount, card.currency, dest.description)
             }
-            val to = when (recipient) {
-                is RecipientUi.Card -> recipient.name ?: formatCardNumber(recipient.card.number)
-                is RecipientUi.Account -> recipient.name ?: recipient.username
-            }
             payment.pay(
-                draft, "Transferir ${formatMoney(money.amount, money.currency)}", "a $to", "Guardar y transferir",
+                draft, "Transferir ${formatMoney(money.amount, money.currency)}", "a ${recipient.to}", "Guardar y transferir",
                 name = (recipient as? RecipientUi.Account)?.let { it.name ?: it.username },
             )
         }
     }
-    TransferReviewScreen(TransferReviewUi(recipient, money, card, sending = payment.busy), actions)
+    TransferReviewScreen(TransferReviewUi(recipient, money, card, sending = payment.busy, duplicate = duplicate), actions)
 }
+
+/** Who a transfer goes to, in one line: the name, or else the card or the account. */
+private val RecipientUi.to: String
+    get() = when (this) {
+        is RecipientUi.Card -> name ?: formatCardNumber(card.number)
+        is RecipientUi.Account -> name ?: username
+    }
 
 @Composable
 fun ResultRoute(plus: PlusApp, intentId: String) {
@@ -268,11 +300,27 @@ fun ResultRoute(plus: PlusApp, intentId: String) {
         pan != null && contacts.orEmpty().none { contact -> contact.cards.any { it.pan == pan } }
     val actions = object : ResultActions {
         override fun retry() {
-            // Nothing was sent: the reviewed intent is still unused, so it may be sent once, with a new approval.
-            val intent = journal?.firstOrNull { it.intent.id == intentId && it.state == EnzonaIntentState.PREPARED }?.intent ?: return
+            val entry = journal?.firstOrNull { it.intent.id == intentId } ?: return
             val money = operation.amount?.let { formatMoney(it.amount, it.currency) }.orEmpty()
-            authorizer.authorize("Enviar $money", operation.title, "Guardar y enviar", onPassword = { plus.submit(intent, it) }, onProblem = plus::say)
+            when (entry.state) {
+                // Nothing was dispatched: the reviewed intent is still unused, so it may be sent once, with a new approval.
+                EnzonaIntentState.PREPARED -> authorizer.authorize("Enviar $money", operation.title, "Guardar y enviar",
+                    onPassword = { password, sealed -> plus.submit(entry.intent, password, sealed) }, onProblem = plus::say)
+                // Its one dispatch never reached ENZONA: a new intent with the same values, a new approval, its own result.
+                EnzonaIntentState.NOT_DELIVERED -> plus.scope.launch {
+                    val again = try { plus.prepareAgain(entry.intent) } catch (_: Exception) {
+                        plus.say("No se pudo preparar el pago.")
+                        return@launch
+                    }
+                    authorizer.authorize("Enviar $money", operation.title, "Guardar y enviar", onPassword = { password, sealed ->
+                        plus.submit(again, password, sealed)
+                        plus.nav.replace(Dest.Result(again.id))
+                    }, onProblem = plus::say)
+                }
+                else -> Unit
+            }
         }
+        override fun changePassword() = plus.nav.push(Dest.PasswordSettings)
         override fun done() = plus.nav.home()
         override fun open() = plus.nav.replace(Dest.Operation("j:$intentId"))
         override fun saveContact() {
@@ -297,7 +345,7 @@ fun PayRoute(plus: PlusApp, code: String?) {
     var problem by remember { mutableStateOf<String?>(null) }
     var amount by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableIntStateOf(selected) }
+    var source by rememberSaveable { mutableStateOf(wallet.getOrNull(selected)?.card?.id) }
 
     fun resolve(raw: String) {
         cardFromQr(raw)?.let { pan ->
@@ -337,25 +385,32 @@ fun PayRoute(plus: PlusApp, code: String?) {
     LaunchedEffect(code) { if (code != null) resolve(code) }
 
     val qr = resolved
-    val index = source.coerceIn(0, (wallet.size - 1).coerceAtLeast(0))
-    val card = wallet.getOrNull(index)?.card
+    // A code in a currency is paid from a card in that currency.
+    val sources = qr?.currency?.let { currency -> wallet.filter { it.card.currency.equals(currency, ignoreCase = true) } } ?: wallet
+    val index = sources.indexOfFirst { it.card.id == source }.coerceAtLeast(0)
+    val card = sources.getOrNull(index)?.card
     val value = if (qr?.amount != null) qr.amount else Amounts.parse(amount)
     val state = when {
         resolving -> PayQrUi.Resolving
         problem != null -> PayQrUi.Unsupported(problem!!)
         qr != null && card != null -> PayQrUi.Review(
             PayReviewUi(
-                qr.name ?: "Comercio", amount, qr.amount == null, description, qr.currency ?: card.currency, wallet, index,
+                qr.name ?: "Comercio", amount, qr.amount == null, description, qr.currency ?: card.currency, sources, index,
                 canPay = value != null && value.signum() > 0, paying = payment.busy,
             ),
         )
-        qr != null -> PayQrUi.Unsupported("No hay tarjetas en ENZONA para pagar")
+        qr != null -> PayQrUi.Unsupported(
+            qr.currency?.let { "Para pagar este código hace falta una tarjeta en ${it.uppercase()}" } ?: "Para pagar hace falta una tarjeta",
+            addCard = true,
+        )
         else -> PayQrUi.Scanning
     }
     val actions = object : PayQrActions {
-        override fun amount(value: String) { amount = value }
+        override fun close() { plus.nav.back() }
+        override fun addCard() = plus.nav.push(Dest.AddCard)
+        override fun amount(value: String) { amount = value.filter { it.isDigit() || it == '.' || it == ',' }.take(12) }
         override fun description(value: String) { description = value }
-        override fun source(index: Int) { source = index }
+        override fun source(index: Int) { source = sources.getOrNull(index)?.card?.id }
         override fun pay() {
             val paid = value ?: return
             val from = card ?: return
@@ -378,45 +433,81 @@ fun PayRoute(plus: PlusApp, code: String?) {
             mode = ScanMode.QR,
             classifyQr = ::classifyQr,
             onResult = { result -> if (result is ScanResult.Qr && resolved == null && problem == null) resolve(result.raw) },
-            onClose = { plus.nav.back() },
         )
     })
 }
 
 // ---- Receive ------------------------------------------------------------------------------------------------
 
+/** The account's code at once, without an amount; «Pedir importe» asks ENZONA for one with it, «Quitar importe» goes back. */
 @Composable
 fun ReceiveRoute(plus: PlusApp) {
     val context = LocalContext.current
     val account by plus.account.collectAsState()
-    var input by rememberSaveable { mutableStateOf("") }
-    var creating by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var code by remember { mutableStateOf<ReceiveUi.Code?>(null) }
     val currency = account?.primaryCurrency ?: "CUP"
     val owner = account?.let { listOfNotNull(it.name, it.lastName).joinToString(" ").ifEmpty { null } }
-    val actions = object : ReceiveActions {
-        override fun back() { plus.nav.back() }
-        override fun key(key: KeypadKey) { input = typeAmount(input, key); error = null }
-        override fun create() {
-            val amount = Amounts.parse(input) ?: return
-            creating = true
-            plus.scope.launch {
-                when (val result = plus.repository.createOwnQr(amount, currency, null)) {
-                    is EnzonaResult.Ok -> code = ReceiveUi.Code(result.value.code, Money(result.value.amount ?: amount, result.value.currency ?: currency), owner)
-                    is EnzonaResult.Failed -> error = result.reason.message()
-                }
-                creating = false
+    var plain by remember { mutableStateOf<EnzonaOwnQr?>(null) }
+    var priced by remember { mutableStateOf<EnzonaOwnQr?>(null) }
+    /** The amount asked for; null while the code goes without one. */
+    var requested by remember { mutableStateOf<BigDecimal?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var asking by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun issue(amount: BigDecimal?) {
+        error = null
+        plus.scope.launch {
+            val result = plus.repository.createOwnQr(amount, currency, null)
+            // An answer for an amount no longer asked for is dropped.
+            if (requested != amount) return@launch
+            when (result) {
+                is EnzonaResult.Ok -> if (amount == null) plain = result.value else priced = result.value
+                is EnzonaResult.Failed -> error = result.reason.message()
             }
         }
-        override fun otherAmount() { code = null }
+    }
+    LaunchedEffect(Unit) { if (plain == null) issue(null) }
+
+    val shown = if (requested == null) plain else priced
+    val actions = object : ReceiveActions {
+        override fun back() { plus.nav.back() }
+        override fun requestAmount() { asking = "" }
+        override fun amount(value: String) { asking = value.filter { it.isDigit() || it == '.' || it == ',' }.take(12) }
+        override fun showAmount() {
+            val amount = Amounts.parse(asking.orEmpty()) ?: return
+            asking = null
+            requested = amount
+            priced = null
+            issue(amount)
+        }
+        override fun closeAmount() { asking = null }
+        override fun clearAmount() {
+            requested = null
+            priced = null
+            error = null
+            if (plain == null) issue(null)
+        }
+        override fun retry() = issue(requested)
         override fun share() {
-            val current = code ?: return
-            context.shareQr(current.payload, "Cobro de ${formatMoney(current.amount.amount, current.amount.currency)}")
+            val code = shown ?: return
+            val money = requested?.let { formatMoney(code.amount ?: it, code.currency ?: currency) }
+            context.shareQr(code.code, money?.let { "Cobro de $it" } ?: "Cobro con ENZONA")
+        }
+        override fun copyAccount() {
+            account?.username?.let { context.copyText("Cuenta ENZONA", it) }
         }
     }
-    BackHandler(code != null) { code = null }
-    ReceiveScreen(code ?: ReceiveUi.Amount(input, currency, creating, error), actions)
+    ReceiveScreen(
+        ReceiveUi(
+            payload = shown?.code,
+            amount = requested?.let { Money(priced?.amount ?: it, priced?.currency ?: currency) },
+            currency = currency,
+            owner = owner,
+            username = account?.username,
+            error = error,
+            asking = asking,
+        ),
+        actions,
+    )
 }
 
 // ---- Universal scanner --------------------------------------------------------------------------------------

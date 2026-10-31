@@ -24,6 +24,8 @@ import dev.duardo.neotransfer.plus.designsystem.component.MoneyText
 import dev.duardo.neotransfer.plus.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButtonStyle
+import dev.duardo.neotransfer.plus.designsystem.component.NeoConfirmSheet
+import dev.duardo.neotransfer.plus.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.plus.designsystem.component.ReceiptTicket
 import dev.duardo.neotransfer.plus.designsystem.component.SummaryLine
@@ -43,20 +45,34 @@ import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
 import dev.duardo.neotransfer.plus.ui.model.OperationUi
+import dev.duardo.neotransfer.plus.ui.model.issuerOf
 import dev.duardo.neotransfer.plus.designsystem.format.formatCardNumber
 
 interface OperationActions {
     fun back()
     fun share()
     fun refresh()
+    /** Ajustes › Contraseña de pago. */
+    fun changePassword()
+    /** Asks first ([OperationDetailScreen]'s `confirmingNotDone`). */
+    fun markNotDone()
+    fun confirmNotDone()
+    fun cancelNotDone()
 }
 
 /**
- * Receipt of one movement. The textured check appears only once ENZONA confirmed it; otherwise the state chip and,
- * when it needs attention, what happened in plain words.
+ * Receipt of one movement. The textured check appears only once ENZONA confirmed it and stands for the state;
+ * otherwise the state chip and, when it needs attention, what happened in plain words. A receipt is shared only for
+ * money that moved or may have.
  */
 @Composable
-fun OperationDetailScreen(operation: OperationUi, actions: OperationActions, modifier: Modifier = Modifier, refreshing: Boolean = false) {
+fun OperationDetailScreen(
+    operation: OperationUi,
+    actions: OperationActions,
+    modifier: Modifier = Modifier,
+    refreshing: Boolean = false,
+    confirmingNotDone: Boolean = false,
+) {
     Scaffold(
         modifier,
         containerColor = MaterialTheme.colorScheme.background,
@@ -76,13 +92,25 @@ fun OperationDetailScreen(operation: OperationUi, actions: OperationActions, mod
                 verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
             ) {
                 when (operation.status) {
-                    OperationStatus.Unconfirmed -> NeoButton("Actualizar actividad", actions::refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh, loading = refreshing)
-                    OperationStatus.Sending -> Unit
+                    OperationStatus.Unconfirmed -> {
+                        NeoButton("Actualizar actividad", actions::refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh, loading = refreshing)
+                        if (operation.canMarkNotDone) NeoTextButton("Marcar como no realizada", actions::markNotDone, Modifier.fillMaxWidth())
+                        NeoTextButton("Cambiar PIN de pago", actions::changePassword, Modifier.fillMaxWidth())
+                    }
+                    OperationStatus.Sending, OperationStatus.NotSent, OperationStatus.Rejected, OperationStatus.NotDone -> Unit
                     else -> NeoButton("Compartir comprobante", actions::share, icon = Ds.drawable.ic_share)
                 }
             }
         }
     }
+    if (confirmingNotDone) NeoConfirmSheet(
+        title = "¿Marcar como no realizada?",
+        text = "Hazlo solo si el saldo de la tarjeta no bajó. Si aparece en tu historial de ENZONA, vuelve a «Sin confirmar».",
+        confirm = "Marcar como no realizada",
+        dismiss = "Cancelar",
+        onConfirm = actions::confirmNotDone,
+        onDismiss = actions::cancelNotDone,
+    )
 }
 
 @Composable
@@ -107,7 +135,8 @@ private fun TicketHeader(operation: OperationUi) {
                 hero = true,
             )
         }
-        if (operation.kind != OperationKind.CardMovement) OperationStatusChip(operation)
+        // The textured check already says it was confirmed; every other state names itself.
+        if (operation.kind != OperationKind.CardMovement && operation.status != OperationStatus.Confirmed) OperationStatusChip(operation)
         operation.reason?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, color = operation.status.tone.content(), textAlign = TextAlign.Center)
         }
@@ -117,7 +146,7 @@ private fun TicketHeader(operation: OperationUi) {
 /** Lines of the receipt, also what is shared. Values already shown in the header are not repeated. */
 fun detailLines(operation: OperationUi, labels: TimeLabels): List<SummaryLine> {
     val counterpart = when (val c = operation.counterpart) {
-        is CounterpartUi.Card -> SummaryLine(if (operation.kind.incoming) "Desde la tarjeta" else "Tarjeta destino", formatCardNumber(c.number), c.bank)
+        is CounterpartUi.Card -> SummaryLine(if (operation.kind.incoming) "Desde la tarjeta" else "Tarjeta destino", formatCardNumber(c.number), c.issuer)
         is CounterpartUi.CardEnding -> SummaryLine(if (operation.kind.incoming) "Desde la tarjeta" else "Tarjeta destino", "•••• ${c.last4}", c.bank)
         is CounterpartUi.Account -> SummaryLine(if (operation.kind.incoming) "Desde la cuenta" else "Cuenta ENZONA", c.username)
         is CounterpartUi.Reference -> SummaryLine(referenceLabel(operation.kind), c.value)
@@ -125,7 +154,7 @@ fun detailLines(operation: OperationUi, labels: TimeLabels): List<SummaryLine> {
     }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
-        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it.numberLine, it.bank) },
+        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it.numberLine, issuerOf(it.bank, it.currency)) },
         operation.description?.takeIf { it != operation.title }?.let { SummaryLine("Concepto", it) },
         operation.channel?.let { SummaryLine("Canal", it) },
         SummaryLine("Fecha", operation.at?.let(labels::stamp) ?: operation.dateText ?: "Sin fecha"),

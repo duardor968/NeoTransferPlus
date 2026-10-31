@@ -15,10 +15,11 @@ import dev.duardo.neotransfer.plus.ui.model.WalletCardUi
 fun EnzonaFailure.message(): String = when (this) {
     EnzonaFailure.SIGNED_OUT -> "Tu sesión de ENZONA caducó. Entra de nuevo."
     EnzonaFailure.TIMEOUT -> "ENZONA tardó demasiado en responder."
-    EnzonaFailure.NETWORK -> "No hay conexión con ENZONA."
+    EnzonaFailure.NETWORK -> "Sin conexión."
     EnzonaFailure.REJECTED -> "ENZONA no aceptó la solicitud."
     EnzonaFailure.INVALID_RESPONSE -> "ENZONA respondió algo que la app no reconoce."
     EnzonaFailure.INVALID_INPUT -> "Revisa los datos."
+    EnzonaFailure.LOCAL -> "No se pudo completar en este teléfono."
 }
 
 /** The user's cards with their balances, as the wallet shows them. */
@@ -58,14 +59,6 @@ fun luhn(digits: String): Boolean {
         sum += d
     }
     return sum % 10 == 0
-}
-
-/** Why a typed card number cannot be used yet; null when it can. */
-fun cardNumberError(digits: String): String? = when {
-    digits.isEmpty() -> null
-    digits.length < 16 -> "Número incompleto"
-    !luhn(digits) -> "Número no válido: revisa los dígitos"
-    else -> null
 }
 
 private val cardDigits = Regex("""(?<![0-9])[0-9](?:[ -]?[0-9]){15}(?![0-9])""")

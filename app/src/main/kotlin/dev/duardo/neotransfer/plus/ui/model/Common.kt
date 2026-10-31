@@ -1,18 +1,31 @@
 package dev.duardo.neotransfer.plus.ui.model
 
 import androidx.compose.runtime.Immutable
+import dev.duardo.neotransfer.plus.designsystem.format.NoBreak
 import java.math.BigDecimal
 import java.time.Instant
 
 @Immutable
 data class Money(val amount: BigDecimal, val currency: String)
 
-/** Issuer art. Only BPA and BANDEC have real card art; any other bank gets a neutral face with its name. */
-enum class CardArt { BPA, BANDEC, Neutral }
+/** Issuer art: BPA, BANDEC and Metropolitano have real card art; any other bank gets a neutral face. */
+enum class CardArt {
+    BPA, BANDEC, BANMET, Neutral;
+
+    companion object {
+        /** By the short bank name shown everywhere. */
+        fun of(bank: String?): CardArt = when (bank) {
+            "BPA" -> BPA
+            "BANDEC" -> BANDEC
+            "Metropolitano" -> BANMET
+            else -> Neutral
+        }
+    }
+}
 
 /**
  * One of the user's cards as ENZONA lists it. [number] is the full PAN once the user completed it (ENZONA only
- * returns [last4]); [bank] is the short issuer name shown everywhere ("BPA", "BANDEC", "BANMET").
+ * returns [last4]); [bank] is the short issuer name shown everywhere ("BPA", "BANDEC", "Metropolitano").
  */
 @Immutable
 data class CardUi(
@@ -36,12 +49,30 @@ sealed interface BalanceUi {
 @Immutable
 data class WalletCardUi(val card: CardUi, val balance: BalanceUi, val refreshing: Boolean = false)
 
-/** A card of someone else. [bank] only when the number tells it. */
+/** A card of someone else. [bank] and [currency] only when the number tells them. */
 @Immutable
-data class ForeignCardUi(val id: String, val number: String, val bank: String? = null, val label: String? = null)
+data class ForeignCardUi(val id: String, val number: String, val bank: String? = null, val label: String? = null, val currency: String? = null) {
+    /** `BANDEC · CUP`. */
+    val issuer: String? get() = issuerOf(bank, currency)
+    val art: CardArt get() = CardArt.of(bank)
+}
+
+/** `BANDEC · CUP`, as far as a card number tells, never split across lines; null when it tells nothing. */
+fun issuerOf(bank: String?, currency: String?): String? = listOfNotNull(bank, currency?.uppercase()).joinToString("$NoBreak·$NoBreak").ifEmpty { null }
+
+/** [fromAddressBook]: name and phones come from the phone's address book. [last]: the newest money sent to them. */
+@Immutable
+data class ContactUi(
+    val id: String,
+    val name: String,
+    val cards: List<ForeignCardUi>,
+    val phones: List<String>,
+    val fromAddressBook: Boolean = false,
+    val last: LastMovementUi? = null,
+)
 
 @Immutable
-data class ContactUi(val id: String, val name: String, val cards: List<ForeignCardUi>, val phones: List<String>)
+data class LastMovementUi(val amount: Money?, val at: Instant?)
 
 /** Who receives a transfer: a card (named when it belongs to a contact) or an ENZONA account read from its QR. */
 @Immutable

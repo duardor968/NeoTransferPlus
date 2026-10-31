@@ -42,13 +42,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentRequests
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoButtonStyle
+import dev.duardo.neotransfer.plus.designsystem.component.NeoCodeField
 import dev.duardo.neotransfer.plus.designsystem.component.NeoIconButton
+import dev.duardo.neotransfer.plus.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.plus.designsystem.component.SecureWindow
+import dev.duardo.neotransfer.plus.designsystem.component.SeparatedText
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
@@ -66,13 +70,16 @@ interface ResultActions {
     fun done()
     fun open()
     fun saveContact()
-    /** Only for a payment that never left the phone: the same reviewed values, a new fingerprint. */
+    /** Only for a payment that never reached ENZONA: the same reviewed values, a new fingerprint. */
     fun retry()
+    /** Ajustes › Contraseña de pago. */
+    fun changePassword()
 }
 
 /**
  * After the single request. Sending turns into the confirmed check, the rejection, or "Sin confirmar" when ENZONA
- * does not prove the result in time: then the money may or may not have moved, and the activity tells.
+ * does not prove the result in time: then the money may or may not have moved, and the activity tells. Back home
+ * first, the operation as a link; above them, what this outcome alone offers.
  */
 @Composable
 fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier: Modifier = Modifier) {
@@ -89,7 +96,7 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                     OperationStatus.Confirmed -> ConfirmedMark(128.dp)
                     OperationStatus.Sending -> SendingMark()
                     OperationStatus.Rejected -> Glyph(Ds.drawable.ic_close, Neo.colors.dangerContainer, Neo.colors.danger)
-                    OperationStatus.NotSent -> Glyph(Ds.drawable.ic_close, Neo.colors.neutralContainer, Neo.colors.neutral)
+                    OperationStatus.NotSent, OperationStatus.NotDone -> Glyph(Ds.drawable.ic_close, Neo.colors.neutralContainer, Neo.colors.neutral)
                     else -> Glyph(Ds.drawable.ic_sync_problem, Neo.colors.warningContainer, Neo.colors.warning)
                 }
                 Spacer(Modifier.height(NeoSpace.xxl))
@@ -97,11 +104,12 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
                 Spacer(Modifier.height(NeoSpace.s))
                 operation.amount?.let { money ->
                     val to = if (operation.kind == OperationKind.CardTransfer || operation.kind == OperationKind.AccountTransfer) " a " else " · "
-                    Text("${formatMoney(money.amount, money.currency)}$to${operation.title}", style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+                    SeparatedText("${formatMoney(money.amount, money.currency)}$to${operation.title}", MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
                 }
                 val note = when (operation.status) {
-                    OperationStatus.Rejected, OperationStatus.Unconfirmed, OperationStatus.NotSent -> operation.reason
-                    OperationStatus.Confirmed -> operation.transactionId?.let { "Transacción $it" }
+                    OperationStatus.Rejected, OperationStatus.Unconfirmed, OperationStatus.NotSent, OperationStatus.NotDone -> operation.reason
+                    // The start of ENZONA's id is enough to find it; the whole one is in the operation.
+                    OperationStatus.Confirmed -> operation.transactionId?.let { "Transacción ${if (it.length > 12) it.take(8) + "…" else it}" }
                     else -> null
                 }
                 note?.let {
@@ -121,23 +129,21 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
             }
             if (operation.status != OperationStatus.Sending) BottomAction {
                 when {
-                    operation.status == OperationStatus.NotSent -> {
-                        NeoButton("Volver al inicio", actions::done, style = NeoButtonStyle.Tonal)
-                        NeoButton("Enviar de nuevo", actions::retry, icon = Ds.drawable.ic_fingerprint)
-                    }
-                    else -> {
-                        if (state.canSaveContact) NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
-                        else NeoButton("Ver operación", actions::open, style = NeoButtonStyle.Tonal)
-                        NeoButton("Volver al inicio", actions::done)
-                    }
+                    operation.status == OperationStatus.NotSent ->
+                        NeoButton("Enviar de nuevo", actions::retry, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_fingerprint)
+                    operation.status == OperationStatus.Unconfirmed ->
+                        NeoButton("Cambiar PIN de pago", actions::changePassword, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_key)
+                    state.canSaveContact -> NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
                 }
+                NeoButton("Volver al inicio", actions::done)
+                NeoTextButton("Ver operación", actions::open, Modifier.fillMaxWidth())
             }
         }
     }
 }
 
 @Composable
-private fun Glyph(icon: Int, container: androidx.compose.ui.graphics.Color, tint: androidx.compose.ui.graphics.Color) {
+internal fun Glyph(icon: Int, container: androidx.compose.ui.graphics.Color, tint: androidx.compose.ui.graphics.Color) {
     Box(Modifier.size(112.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
         Icon(painterResource(icon), null, Modifier.size(48.dp), tint = tint)
     }
@@ -175,35 +181,25 @@ interface PasswordSheetActions {
 }
 
 /**
- * The ENZONA payment password, asked once: the fingerprint keeps it on this phone and unlocks it for every
- * payment after this one. Secret: no screenshots while open.
+ * The ENZONA payment password: the fingerprint keeps it on this phone once a payment with it is confirmed, and unlocks
+ * it for the payments after. [PasswordSheetUi.notice] says why it is asked again. Secret: no screenshots while open.
  */
 @Composable
 fun PasswordSheet(state: PasswordSheetUi, actions: PasswordSheetActions) {
     SecureWindow()
-    NeoBottomSheet(onDismissRequest = actions::dismiss, title = "Contraseña de pago") {
+    NeoBottomSheet(onDismissRequest = actions::dismiss, title = "PIN de pago") {
         Column(Modifier.padding(horizontal = NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
-            PasswordField(state.value, actions::value, "Contraseña", state.error)
-            NeoButton(state.action, actions::submit, icon = Ds.drawable.ic_fingerprint, enabled = state.value.isNotEmpty())
+            state.notice?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Neo.colors.warning) }
+            PasswordField(state.value, actions::value, "PIN", state.error)
+            NeoButton(state.action, actions::submit, icon = Ds.drawable.ic_fingerprint, enabled = isPaymentPassword(state.value))
         }
     }
 }
 
+/** Six digits, ENZONA's own format for the payment password. */
+fun isPaymentPassword(value: String): Boolean = value.length == EnzonaPaymentRequests.PASSWORD_DIGITS && value.all { it in '0'..'9' }
+
+/** ENZONA's six digits, one box each. */
 @Composable
-fun PasswordField(value: String, onChange: (String) -> Unit, label: String, error: String?) {
-    var visible by remember { mutableStateOf(false) }
-    NeoTextField(
-        value, onChange, label,
-        keyboardType = KeyboardType.Password,
-        imeAction = ImeAction.Done,
-        error = error,
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailing = {
-            NeoIconButton(
-                if (visible) Ds.drawable.ic_visibility_off else Ds.drawable.ic_visibility,
-                if (visible) "Ocultar contraseña" else "Mostrar contraseña",
-                { visible = !visible },
-            )
-        },
-    )
-}
+fun PasswordField(value: String, onChange: (String) -> Unit, label: String, error: String?) =
+    NeoCodeField(value, onChange, EnzonaPaymentRequests.PASSWORD_DIGITS, label, error = error)

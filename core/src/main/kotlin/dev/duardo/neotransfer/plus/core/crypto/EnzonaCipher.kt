@@ -13,8 +13,8 @@ import javax.crypto.Cipher
 
 /**
  * `Base64(RSAES-PKCS1-v1_5(ENZONA public key, UTF-8(text)))`, traced at AccountController.cifrar
- * 0x6ae608 (ENZONA 1.11.0). Used separately for the payment password and the recipient PAN.
- * The bank-certificate OAEP-SHA1 contract (card enrolment) is a different, unimplemented path.
+ * 0x6ae608 (ENZONA 1.11.0). Used separately for the payment password, the recipient PAN and the PAN of a card
+ * added to the account; the bank-certificate OAEP-SHA1 part of adding a card is EnzonaCardRequests'.
  */
 class EnzonaCipher(
     private val publicKey: RSAPublicKey,

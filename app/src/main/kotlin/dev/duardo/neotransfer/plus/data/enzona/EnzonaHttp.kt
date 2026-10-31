@@ -10,15 +10,39 @@ import okhttp3.Callback
 import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
+import java.io.InterruptedIOException
 import kotlin.coroutines.resumeWithException
 
 internal class EnzonaHttp(private val transport: EnzonaTransport = EnzonaTransport()) : AutoCloseable {
-    suspend fun execute(request: Request): EnzonaHttpReply = suspendCancellableCoroutine { continuation ->
+    /**
+     * Logs every exchange that does not end in HTTP 200 (see [EnzonaLog]); a cancelled call is not a failure. A read
+     * (GET) whose connection broke is sent once more, and how that went is logged too (`retry ok`, `again …`): a pooled
+     * connection ENZONA already closed fails at once, with the network fine. Anything else, money above all, is never
+     * sent again; neither is a read that timed out. A body that never left the phone fails as [EnzonaNotDeliveredException].
+     */
+    suspend fun execute(request: Request): EnzonaHttpReply {
+        var started = System.nanoTime()
+        fun outcome(result: String) = EnzonaLog.warn("http ${EnzonaLog.endpoint(request.method, request.url)} -> $result " +
+            "(${(System.nanoTime() - started) / 1_000_000} ms)")
+        val reply = try { call(request) } catch (failure: IOException) {
+            outcome(EnzonaLog.error(failure))
+            if (request.method != "GET" || failure is InterruptedIOException) throw failure
+            started = System.nanoTime()
+            val again = try { call(request) } catch (again: IOException) { outcome("again ${EnzonaLog.error(again)}"); throw again }
+            outcome(if (again.status == 200) "retry ok" else "again ${again.status}")
+            return again
+        }
+        if (reply.status != 200) outcome(reply.status.toString())
+        return reply
+    }
+
+    private suspend fun call(request: Request): EnzonaHttpReply = suspendCancellableCoroutine { continuation ->
         val call = transport.newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(e)
+                val unsent = (call.request().body as? SingleSendBody)?.written == false
+                if (continuation.isActive) continuation.resumeWithException(if (unsent) EnzonaNotDeliveredException(e) else e)
             }
 
             override fun onResponse(call: Call, response: Response) {

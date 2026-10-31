@@ -13,7 +13,7 @@ import dev.duardo.neotransfer.plus.app.Dest
 import dev.duardo.neotransfer.plus.app.LocalAuthorizer
 import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.invoiceService
-import dev.duardo.neotransfer.plus.app.recentReferences
+import dev.duardo.neotransfer.plus.app.referenceKey
 import dev.duardo.neotransfer.plus.core.money.Amounts
 import dev.duardo.neotransfer.plus.core.payment.EnzonaInvoicePaymentDraft
 import dev.duardo.neotransfer.plus.core.service.EnzonaElectricityBill
@@ -23,7 +23,8 @@ import dev.duardo.neotransfer.plus.data.EnzonaResult
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.ui.model.BillUi
 import dev.duardo.neotransfer.plus.ui.model.Money
-import dev.duardo.neotransfer.plus.ui.model.RecentReferenceUi
+import dev.duardo.neotransfer.plus.ui.model.SavedEditUi
+import dev.duardo.neotransfer.plus.ui.model.SavedReferenceUi
 import dev.duardo.neotransfer.plus.ui.model.ServiceFormUi
 import dev.duardo.neotransfer.plus.ui.model.ServiceKind
 import dev.duardo.neotransfer.plus.ui.model.ServiceLookupUi
@@ -37,15 +38,14 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ServicesRoute(plus: PlusApp) {
-    val journal by plus.journal.collectAsState()
-    val recent = remember(journal) { recentReferences(journal.orEmpty()) }
+    val saved by plus.saved.collectAsState()
     val actions = remember(plus) {
         object : ServicesActions {
             override fun open(kind: ServiceKind) = plus.nav.push(Dest.Service(kind))
-            override fun repeat(reference: RecentReferenceUi) = plus.nav.push(Dest.Service(reference.kind, reference.value))
+            override fun pay(reference: SavedReferenceUi) = plus.nav.push(Dest.Service(reference.kind, reference.value))
         }
     }
-    ServicesScreen(ServicesUi(recent), actions)
+    ServicesScreen(ServicesUi(saved), actions)
 }
 
 /** What ENZONA answered, kept with the identifiers a payment needs. */
@@ -76,7 +76,11 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
     val selected by plus.selectedCard.collectAsState()
     val authorizer = LocalAuthorizer.current
     val payment = remember(plus, authorizer) { Payment(plus, authorizer) }
-    var reference by rememberSaveable { mutableStateOf(dest.reference) }
+    val saved by plus.saved.collectAsState()
+    // A saved Nauta account comes with its domain; the field shows the domain apart.
+    var reference by rememberSaveable { mutableStateOf(kind.domain?.let(dest.reference::removeSuffix) ?: dest.reference) }
+    var editing by rememberSaveable { mutableStateOf<String?>(null) }
+    var removing by rememberSaveable { mutableStateOf(false) }
     var amount by rememberSaveable { mutableStateOf("") }
     var source by rememberSaveable { mutableIntStateOf(selected) }
     var bill by rememberSaveable { mutableStateOf<String?>(null) }
@@ -142,6 +146,7 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
         )
         else -> ServiceLookupUi.None
     }
+    val savedReference = saved.firstOrNull { it.kind == kind && it.value == kind.normalize(reference) }
     val topUp = lookupUi as? ServiceLookupUi.TopUp
     val typed = Amounts.parse(amount)
     val amountError = when {
@@ -170,6 +175,10 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
             answer = null
             failure = null
         }
+        override fun pick(reference: SavedReferenceUi?) {
+            reference(reference?.value?.let { kind.domain?.let(it::removeSuffix) ?: it }.orEmpty())
+            if (reference != null) lookup()
+        }
         override fun lookup() = lookup()
         override fun bill(id: String) { bill = id }
         override fun amount(value: String) { amount = value }
@@ -179,11 +188,36 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
             val verb = if (kind == ServiceKind.Nauta || kind == ServiceKind.NautaHome) "Recargar" else "Pagar"
             payment.pay(ready, "$verb ${formatMoney(ready.amount, ready.currency)}", kind.label, "Guardar y pagar", name = null)
         }
+        override fun editSaved() {
+            editing = savedReference?.name.orEmpty()
+            removing = false
+        }
+        override fun savedName(value: String) { editing = value.take(40) }
+        override fun saveSaved() {
+            val target = savedReference ?: return
+            plus.savedMarks.rename(referenceKey(kind, target.value), editing.orEmpty())
+            editing = null
+        }
+        override fun removeSaved() { removing = true }
+        override fun confirmRemoveSaved() {
+            val target = savedReference ?: return
+            plus.savedMarks.remove(referenceKey(kind, target.value), System.currentTimeMillis())
+            editing = null
+            removing = false
+            plus.nav.back()
+        }
+        override fun cancelRemoveSaved() { removing = false }
+        override fun closeSaved() {
+            editing = null
+            removing = false
+        }
     }
     ServiceFormScreen(
         ServiceFormUi(
-            kind, reference, lookup = lookupUi, amount = amount, amountError = amountError, currency = currency,
+            kind, reference, references = saved.filter { it.kind == kind }, selectedReference = savedReference?.value, lookup = lookupUi, amount = amount, amountError = amountError, currency = currency,
             cards = wallet, source = index, canPay = draft != null, paying = payment.busy,
+            saved = savedReference != null,
+            edit = editing?.takeIf { savedReference != null }?.let { SavedEditUi(it, removing) },
         ),
         actions,
     )

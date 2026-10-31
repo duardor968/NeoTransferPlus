@@ -5,12 +5,16 @@ import dev.duardo.neotransfer.plus.core.payment.EnzonaAccountTransferDraft
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaInvoicePaymentDraft
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentEvidence
+import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentFault
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentRequest
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentRequests
 import dev.duardo.neotransfer.plus.core.service.EnzonaInvoiceService
 import dev.duardo.neotransfer.plus.core.service.EnzonaServicePaymentState
+import dev.duardo.neotransfer.plus.data.enzona.db.couldBeUndelivered
 
+import java.io.IOException
 import java.math.BigDecimal
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPublicKey
@@ -56,11 +60,25 @@ class EnzonaPaymentCoordinatorTest {
             if (won) afterBegin()
             return won
         }
-        override suspend fun markTimedOut(owner: String, id: String): Boolean = synchronized(rows) {
+        override suspend fun markUnknown(owner: String, id: String, evidence: EnzonaPaymentEvidence?): Boolean = synchronized(rows) {
             val current = rows[id] ?: return@synchronized false
-            if (current.intent.ownerSubject != owner || current.state != EnzonaIntentState.SUBMITTING) return@synchronized false
-            rows[id] = current.copy(state = EnzonaIntentState.UNKNOWN)
+            if (current.intent.ownerSubject != owner || current.state !in setOf(EnzonaIntentState.SUBMITTING, EnzonaIntentState.UNKNOWN)) return@synchronized false
+            rows[id] = current.copy(state = EnzonaIntentState.UNKNOWN, remoteId = current.remoteId ?: evidence?.transactionUuid,
+                httpStatus = evidence?.httpStatus ?: current.httpStatus ?: 0, faultCode = evidence?.fault?.code ?: current.faultCode,
+                faultText = evidence?.fault?.text ?: current.faultText)
+            current.state == EnzonaIntentState.SUBMITTING
+        }
+        override suspend fun markNotDelivered(owner: String, id: String): Boolean = synchronized(rows) {
+            val current = rows[id] ?: return@synchronized false
+            if (current.intent.ownerSubject != owner || !current.couldBeUndelivered()) return@synchronized false
+            rows[id] = current.copy(state = EnzonaIntentState.NOT_DELIVERED)
             true
+        }
+        override suspend fun abandonFlights(): Int = synchronized(rows) {
+            steps += "abandon"
+            val flying = rows.values.filter { it.state == EnzonaIntentState.SUBMITTING }
+            flying.forEach { rows[it.intent.id] = it.copy(state = EnzonaIntentState.UNKNOWN) }
+            flying.size
         }
         override suspend fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?): Boolean = synchronized(rows) {
             check(!failRecord)
@@ -77,7 +95,7 @@ class EnzonaPaymentCoordinatorTest {
     private fun draft() = EnzonaAccountTransferDraft("remote-card", "recipient-uuid", "recipient-user", BigDecimal("10.2300"), "cup", "reviewed")
     private fun success(transactionUuid: String? = "observed-id", uuid: String? = null) =
         EnzonaPaymentEvidence(EnzonaIntentState.CONFIRMED, 200, "1111", transactionUuid, uuid, 123)
-    private fun password() = charArrayOf('f', 'i', 'x', 't', 'u', 'r', 'e')
+    private fun password() = "135790".toCharArray()
     private fun cleared(value: CharArray) = assertTrue(value.all { it == '\u0000' })
     private fun manager(journal: Journal, wait: Long = 500, tokenSource: suspend () -> EnzonaTokens = { tokens() },
         send: suspend (EnzonaTokens, EnzonaPaymentRequest) -> EnzonaPaymentEvidence) =
@@ -93,7 +111,7 @@ class EnzonaPaymentCoordinatorTest {
         }.use { coordinator ->
             val reviewed = draft()
             val intent = coordinator.prepare(owner, reviewed)
-            assertEquals(listOf("prepare"), journal.steps)
+            assertEquals(listOf("abandon", "prepare"), journal.steps)
             assertEquals("10.2300", intent.amount)
             assertEquals(reviewed.fundingSourceUuid, intent.cardUuid)
             assertEquals(reviewed.fundingRecipientUuid, intent.destination.value)
@@ -103,12 +121,36 @@ class EnzonaPaymentCoordinatorTest {
             val result = coordinator.submit(intent, secret)
             cleared(secret)
             assertEquals(EnzonaIntentState.CONFIRMED, result.state)
-            assertEquals(listOf("prepare", "tokens", "CAS", "POST"), journal.steps)
+            assertEquals(listOf("abandon", "prepare", "tokens", "CAS", "POST"), journal.steps)
             assertEquals(intent, journal.rows.getValue(intent.id).intent)
             assertEquals("observed-id", journal.rows.getValue(intent.id).remoteId)
             assertFalse(coordinator.submit(intent, password()).submissionStarted)
             assertEquals(1, journal.steps.count { it == "POST" })
         }
+    }
+
+    @Test fun aPaymentThatFailsSaysWhyAndIsLoggedWithoutItsDetails() = runBlocking {
+        val lines = collectingLog { lines ->
+            val journal = Journal()
+            manager(journal, tokenSource = { throw EnzonaSessionUnavailableException(EnzonaSessionFailure.TIMEOUT) }) { _, _ ->
+                error("never sent")
+            }.use { coordinator ->
+                val intent = coordinator.prepare(owner, draft())
+                val stopped = assertFailsWith<EnzonaPaymentPreparationException> { coordinator.submit(intent, password()) }
+                assertEquals(EnzonaSessionFailure.TIMEOUT, stopped.session)
+            }
+            manager(journal) { _, _ -> throw SocketTimeoutException("PRIVATE") }.use { coordinator ->
+                val intent = coordinator.prepare(owner, draft())
+                assertEquals(EnzonaPaymentNotice.TIMEOUT, coordinator.submit(intent, password()).notice)
+            }
+            lines.toList()
+        }
+        assertEquals(listOf(
+            "payment not sent: POST /transfer/v1.0.0/transfer/account session=TIMEOUT error=EnzonaSessionUnavailableException(TIMEOUT)",
+            "payment request failed: POST /transfer/v1.0.0/transfer/account error=SocketTimeoutException",
+            "payment UNKNOWN: POST /transfer/v1.0.0/transfer/account notice=TIMEOUT http=- status_code=- sent=true late=false",
+        ), lines)
+        assertTrue(lines.none { "10.23" in it || "recipient" in it || "remote-card" in it || "fixture" in it || owner in it })
     }
 
     @Test fun racingCallbacksGrantOnlyOnePost() = runBlocking {
@@ -168,7 +210,9 @@ class EnzonaPaymentCoordinatorTest {
                 reply.complete(EnzonaPaymentEvidence(EnzonaIntentState.UNKNOWN, 200, "9999", "observed", null, 456))
                 assertEquals("9999", late.await().evidence!!.statusCode)
                 assertEquals(EnzonaIntentState.UNKNOWN, journal.rows.getValue(intent.id).state)
-                assertNull(journal.rows.getValue(intent.id).remoteId)
+                // Kept to find its row in the history, never as a result.
+                assertEquals("observed", journal.rows.getValue(intent.id).remoteId)
+                assertEquals(200, journal.rows.getValue(intent.id).httpStatus)
                 assertEquals(1, sends)
             }
         }
@@ -198,9 +242,71 @@ class EnzonaPaymentCoordinatorTest {
             val result = coordinator.submit(intent, password())
             assertEquals(EnzonaIntentState.UNKNOWN, result.state)
             assertEquals(EnzonaPaymentNotice.TIMEOUT, result.notice)
+            assertEquals(0, journal.rows.getValue(intent.id).httpStatus) // no reply arrived
             assertFalse(coordinator.submit(intent, password()).submissionStarted)
             assertEquals(1, sends)
         }
+    }
+
+    @Test fun aBodyThatNeverLeftThePhoneIsNotDeliveredAndCanNeverBeSentAgain() = runBlocking {
+        val lines = collectingLog { lines ->
+            for (cause in listOf<IOException>(ConnectException("PRIVATE"), SocketTimeoutException("PRIVATE"))) {
+                val journal = Journal()
+                var sends = 0
+                manager(journal) { _, _ -> sends++; throw EnzonaNotDeliveredException(cause) }.use { coordinator ->
+                    val intent = coordinator.prepare(owner, draft())
+                    val result = coordinator.submit(intent, password())
+                    assertEquals(EnzonaIntentState.NOT_DELIVERED, result.state)
+                    assertTrue(result.submissionStarted)
+                    assertNull(result.notice)
+                    assertEquals(EnzonaIntentState.NOT_DELIVERED, journal.rows.getValue(intent.id).state)
+                    val again = coordinator.submit(intent, password())
+                    assertFalse(again.submissionStarted)
+                    assertEquals(EnzonaPaymentNotice.NOT_RESENDABLE, again.notice)
+                    assertEquals(1, sends)
+                }
+            }
+            lines.toList()
+        }
+        assertTrue(lines.any { it.startsWith("payment NOT_DELIVERED: POST /transfer/v1.0.0/transfer/account notice=- http=-") }, lines.toString())
+        assertTrue(lines.none { "PRIVATE" in it })
+    }
+
+    @Test fun aReplyWithAFaultStaysUnknownAndKeepsWhatEnzonaSaid() = runBlocking {
+        val lines = collectingLog { lines ->
+            val journal = Journal()
+            val fault = EnzonaPaymentFault("0507", "Contraseña de pago incorrecta", listOf("cod", "description"))
+            manager(journal) { _, _ -> EnzonaPaymentEvidence(EnzonaIntentState.UNKNOWN, 400, null, "fault-id", null, 1, fault = fault) }
+                .use { coordinator ->
+                    val intent = coordinator.prepare(owner, draft())
+                    val result = coordinator.submit(intent, password())
+                    assertEquals(EnzonaIntentState.UNKNOWN, result.state)
+                    assertEquals(EnzonaPaymentNotice.UNCONFIRMED, result.notice)
+                    val row = journal.rows.getValue(intent.id)
+                    assertEquals(400, row.httpStatus)
+                    assertEquals("0507", row.faultCode)
+                    assertEquals("Contraseña de pago incorrecta", row.faultText)
+                    assertEquals("fault-id", row.remoteId)
+                }
+            lines.toList()
+        }
+        assertEquals(listOf("payment UNKNOWN: POST /transfer/v1.0.0/transfer/account notice=UNCONFIRMED http=400 status_code=- " +
+            "fault=cod,description sent=true late=false"), lines)
+    }
+
+    @Test fun whatAnEarlierProcessLeftInFlightIsUnconfirmedBeforeAnyNewSend() = runBlocking {
+        val journal = Journal()
+        val earlier = manager(journal) { _, _ -> error("not sent") }.use { it.prepare(owner, draft()) }
+        journal.rows[earlier.id] = journal.rows.getValue(earlier.id).copy(state = EnzonaIntentState.SUBMITTING)
+        val lines = collectingLog { lines ->
+            manager(journal) { _, _ -> success() }.use { coordinator ->
+                assertEquals(EnzonaIntentState.UNKNOWN, journal.rows.getValue(earlier.id).state)
+                assertEquals(EnzonaIntentState.CONFIRMED, coordinator.submit(coordinator.prepare(owner, draft()), password()).state)
+            }
+            lines.toList()
+        }
+        assertEquals(listOf("payments in flight at start: 1 marked UNKNOWN"), lines)
+        assertTrue(journal.steps.lastIndexOf("abandon") < journal.steps.indexOf("CAS"))
     }
 
     @Test fun tokenFailureOrDifferentOwnerLeavesPreparedAndErasesPassword() = runBlocking {
@@ -278,7 +384,7 @@ class EnzonaPaymentCoordinatorTest {
                 releaseCas.complete(Unit)
                 val result = submitting.await()
                 assertEquals(0, sends)
-                assertEquals(EnzonaIntentState.UNKNOWN, result.state)
+                assertEquals(EnzonaIntentState.NOT_DELIVERED, result.state)
                 assertEquals(EnzonaPaymentNotice.NOT_SENT_AUTHORIZATION_EXPIRED, result.notice)
                 cleared(secret)
             }
@@ -325,17 +431,17 @@ class EnzonaPaymentCoordinatorTest {
                     assertEquals(3, checks)
                     assertEquals(0, sends)
                     assertTrue(result.submissionStarted) // CAS was consumed, not a network send.
-                    assertEquals(EnzonaIntentState.UNKNOWN, result.state)
+                    assertEquals(EnzonaIntentState.NOT_DELIVERED, result.state)
                     assertEquals(EnzonaPaymentNotice.NOT_SENT_AUTHORIZATION_EXPIRED, result.notice)
                     assertNull(result.evidence)
-                    assertEquals(EnzonaIntentState.UNKNOWN, journal.rows.getValue(intent.id).state)
+                    assertEquals(EnzonaIntentState.NOT_DELIVERED, journal.rows.getValue(intent.id).state)
                     clock = authorizedAt
                     currentOwner = owner
                     unlocked = true
                     resumed = true
                     val later = coordinator.submit(intent, password(), canDispatch)
                     assertFalse(later.submissionStarted)
-                    assertEquals(EnzonaIntentState.UNKNOWN, later.state)
+                    assertEquals(EnzonaIntentState.NOT_DELIVERED, later.state)
                     assertEquals(0, sends)
                     assertEquals(1, journal.steps.count { it == "CAS" })
                 }

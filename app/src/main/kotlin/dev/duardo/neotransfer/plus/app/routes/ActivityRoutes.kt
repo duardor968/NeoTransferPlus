@@ -8,14 +8,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import dev.duardo.neotransfer.plus.app.ByAmountReason
 import dev.duardo.neotransfer.plus.app.Dest
 import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.accountActivity
 import dev.duardo.neotransfer.plus.app.movements
 import dev.duardo.neotransfer.plus.app.toUi
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaHistoryMatch
 import dev.duardo.neotransfer.plus.designsystem.format.formatAmount
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
 import dev.duardo.neotransfer.plus.platform.shareText
@@ -37,6 +41,7 @@ import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
 import dev.duardo.neotransfer.plus.ui.model.OperationUi
 import dev.duardo.neotransfer.plus.ui.model.RefreshState
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @Composable
 fun ActivityRoute(plus: PlusApp) {
@@ -136,6 +141,7 @@ fun rememberOperation(plus: PlusApp, key: String): OperationUi? {
             "j" -> journal?.firstOrNull { it.intent.id == rest }?.let { entry ->
                 val history = entry.remoteId?.let { id -> transactions?.firstOrNull { it.transactionUuid == id } }
                 history?.toUi(account?.username, cards, plus.zone)
+                    ?.let { row -> if (entry.matchedBy == EnzonaHistoryMatch.AMOUNT_AND_TIME) row.copy(reason = ByAmountReason) else row }
                     ?: entry.toUi(cards, contacts.orEmpty(), notices[rest], titles[rest], notSent[rest])
             }
             "m" -> {
@@ -157,6 +163,7 @@ fun OperationRoute(plus: PlusApp, key: String) {
     val journal by plus.journal.collectAsState()
     val wallet by plus.wallet.collectAsState()
     val clock = LocalClock.current
+    var confirmingNotDone by remember { mutableStateOf(false) }
     val loaded = when (key.substringBefore(':')) {
         "tx" -> transactions != null
         "j" -> journal != null
@@ -174,9 +181,18 @@ fun OperationRoute(plus: PlusApp, key: String) {
             override fun back() { plus.nav.back() }
             override fun share() = context.shareText(receiptText(operation, TimeLabels(clock)), "Compartir comprobante")
             override fun refresh() = plus.refresh()
+            override fun changePassword() = plus.nav.push(Dest.PasswordSettings)
+            override fun markNotDone() { confirmingNotDone = true }
+            override fun confirmNotDone() {
+                confirmingNotDone = false
+                plus.scope.launch {
+                    if (!plus.markNotDone(key.substringAfter(':'))) plus.say("No se pudo marcar. Actualiza la actividad e inténtalo de nuevo.")
+                }
+            }
+            override fun cancelNotDone() { confirmingNotDone = false }
         }
     }
-    OperationDetailScreen(operation, actions, refreshing = refresh == RefreshState.Refreshing)
+    OperationDetailScreen(operation, actions, refreshing = refresh == RefreshState.Refreshing, confirmingNotDone = confirmingNotDone)
 }
 
 /** The receipt as plain text: what, who, how much, state and the same lines as on screen. */

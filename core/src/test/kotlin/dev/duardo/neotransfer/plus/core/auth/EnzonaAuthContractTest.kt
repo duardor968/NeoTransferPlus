@@ -59,6 +59,13 @@ class EnzonaAuthContractTest {
         assertFalse(uri.rawQuery.contains("nonce="))
     }
 
+    @Test fun `the account email goes as login_hint, and nothing else of the account`() {
+        val hinted = fields(EnzonaAuthContract.newAttempt(loginHint = " persona+prueba@example.com ").authorizationUri.rawQuery)
+        assertEquals("persona+prueba@example.com", hinted["login_hint"])
+        assertFalse("login_hint" in fields(EnzonaAuthContract.newAttempt().authorizationUri.rawQuery))
+        assertFalse("login_hint" in fields(EnzonaAuthContract.newAttempt(loginHint = "  ").authorizationUri.rawQuery))
+    }
+
     @Test fun `new production attempts have fresh state and verifier challenges`() {
         val first = fields(EnzonaAuthContract.newAttempt().authorizationUri.rawQuery)
         val second = fields(EnzonaAuthContract.newAttempt().authorizationUri.rawQuery)

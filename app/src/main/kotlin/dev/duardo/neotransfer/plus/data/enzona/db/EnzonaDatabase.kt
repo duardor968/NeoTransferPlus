@@ -11,7 +11,10 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaHistoryMatch
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaJournalEntry
 import kotlinx.coroutines.flow.Flow
 
@@ -110,23 +113,52 @@ internal interface EnzonaDao {
     @Query("UPDATE intent_journal SET state = 'SUBMITTING' WHERE ownerSubject = :owner AND id = :id AND state = 'PREPARED'")
     fun tryBeginSubmission(owner: String, id: String): Int
 
-    @Query("UPDATE intent_journal SET state = 'UNKNOWN' WHERE ownerSubject = :owner AND id = :id AND state = 'SUBMITTING'")
-    fun markTimedOut(owner: String, id: String): Int
+    @Query("UPDATE intent_journal SET state = 'UNKNOWN' WHERE state = 'SUBMITTING'")
+    fun abandonFlights(): Int
 
     @Query("DELETE FROM read_cache WHERE ownerSubject = :owner") fun deleteCache(owner: String)
     @Query("DELETE FROM transaction_history WHERE ownerSubject = :owner") fun deleteHistory(owner: String)
     @Query("DELETE FROM history_sync WHERE ownerSubject = :owner") fun deleteHistorySync(owner: String)
     @Query("DELETE FROM card_links WHERE ownerSubject = :owner") fun deleteCardLinks(owner: String)
+    @Query("DELETE FROM card_links WHERE ownerSubject = :owner AND cardUuid = :cardUuid") fun deleteCardLink(owner: String, cardUuid: String)
+    @Query("DELETE FROM read_cache WHERE ownerSubject = :owner AND kind = :kind AND resourceId = :resourceId")
+    fun deleteCacheRow(owner: String, kind: EnzonaReadKind, resourceId: String)
 
     // No query edits reviewed intent fields, replaces journal rows, or deletes money records.
     @Query("UPDATE intent_journal SET state = :state, remoteId = :remoteId WHERE ownerSubject = :owner AND id = :id")
     fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?)
+
+    @Query("""UPDATE intent_journal SET state = :state, remoteId = :remoteId, httpStatus = :httpStatus, faultCode = :faultCode,
+        faultText = :faultText WHERE ownerSubject = :owner AND id = :id""")
+    fun recordReply(owner: String, id: String, state: EnzonaIntentState, remoteId: String?, httpStatus: Int?, faultCode: String?, faultText: String?)
+
+    @Query("""UPDATE intent_journal SET state = :state, remoteId = :remoteId, matchedBy = :matchedBy, notFoundAt = NULL,
+        markedNotDoneAt = NULL WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN' AND (remoteId IS NULL OR remoteId = :remoteId)""")
+    fun settle(owner: String, id: String, state: EnzonaIntentState, remoteId: String, matchedBy: EnzonaHistoryMatch): Int
+
+    @Query("UPDATE intent_journal SET notFoundAt = NULL, markedNotDoneAt = NULL WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN'")
+    fun seenInHistory(owner: String, id: String): Int
+
+    @Query("UPDATE intent_journal SET notFoundAt = :at WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN'")
+    fun notFoundInHistory(owner: String, id: String, at: Long): Int
+
+    @Query("""UPDATE intent_journal SET markedNotDoneAt = :at WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN'
+        AND markedNotDoneAt IS NULL AND notFoundAt >= preparedAt + :wait""")
+    fun markNotDone(owner: String, id: String, at: Long, wait: Long): Int
+}
+
+/** v2 keeps what ENZONA answered to each attempt and what its history says of it; every v1 row stays as it was. */
+internal val MIGRATION_1_2 = object : Migration(1, 2) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        for (column in listOf("`httpStatus` INTEGER", "`faultCode` TEXT", "`faultText` TEXT", "`matchedBy` TEXT",
+            "`notFoundAt` INTEGER", "`markedNotDoneAt` INTEGER")) db.execSQL("ALTER TABLE `intent_journal` ADD COLUMN $column")
+    }
 }
 
 @Database(
     entities = [EnzonaCacheRow::class, EnzonaCardLink::class, EnzonaJournalEntry::class,
         EnzonaTransactionRow::class, EnzonaHistorySync::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 internal abstract class EnzonaDatabase : RoomDatabase() {
@@ -137,7 +169,7 @@ internal abstract class EnzonaDatabase : RoomDatabase() {
 
         fun open(context: Context, name: String = NAME): EnzonaDatabase {
             require(name.isNotBlank() && '/' !in name && '\\' !in name)
-            return Room.databaseBuilder(context, EnzonaDatabase::class.java, name).build()
+            return Room.databaseBuilder(context, EnzonaDatabase::class.java, name).addMigrations(MIGRATION_1_2).build()
         }
     }
 }

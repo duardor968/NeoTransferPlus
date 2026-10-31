@@ -23,9 +23,9 @@ En Linux o macOS, `./gradlew` con las mismas tareas. Los módulos se describen e
 .\gradlew.bat :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest
 ```
 
-- `:core:test`: contrato de acceso y tokens, solicitudes de pago y su cifrado, lectura del JSON de cuenta, tarjetas, saldos e historial, QR, servicios e importes.
+- `:core:test`: contrato de acceso y tokens, solicitudes de pago y su cifrado, lectura del JSON de cuenta, tarjetas, saldos e historial, QR, servicios, importes, teléfonos con prefijo, y banco y moneda por el número de tarjeta.
 - `:scanner:testDebugUnitTest`: lectura de números, QR en imágenes generadas y seguimiento entre cuadros.
-- `:app:testDebugUnitTest`: transporte, sesión, API, pago de un solo envío, aprobación, la fachada `EnzonaRepository`, la fusión del historial y lo que muestran las pantallas.
+- `:app:testDebugUnitTest`: transporte, sesión, API, pago de un solo envío, aprobación, la fachada `EnzonaRepository`, la fusión del historial y la conciliación de los pagos sin confirmar, la migración de `enzona.db` (Robolectric, desde el esquema exportado), la unión de la agenda con los contactos guardados y lo que muestran las pantallas.
 
 Todas corren sin red: cada respuesta de ENZONA es sintética (un interceptor, `mockwebserver3` o una lambda), igual que los tokens. Ninguna prueba demuestra que el servidor acepte una operación.
 
@@ -89,9 +89,9 @@ La suma SHA-256 va en las notas de cada versión. Antes de publicar, comprueba q
 
 ## Fondos de tarjeta
 
-`app/src/main/res/drawable-nodpi/card_bpa_red.png` y `card_bandec_red.png` son PNG de 1579 × 996 píxeles, RGB sin transparencia y a sangre: la app redondea las esquinas. Son los mismos de NeoTransfer, exportados de reconstrucciones vectoriales hechas a partir de fotos; el vector de origen no está en el repositorio.
+`app/src/main/res/drawable-nodpi/card_bpa_red.png`, `card_bandec_red.png` y `card_banmet_red.png` son PNG de 1579 × 996 píxeles, RGB sin transparencia y a sangre: la app redondea las esquinas. Son los mismos de NeoTransfer, exportados de reconstrucciones vectoriales hechas a partir de fotos; el vector de origen no está en el repositorio.
 
-Número, titular, moneda y vencimiento los dibuja la app en las posiciones de `BpaPrint` y `BandecPrint` (`app/src/main/kotlin/dev/duardo/neotransfer/plus/ui/common/Cards.kt`), en fracciones del ancho y del alto de la tarjeta: si el arte cambia, recalíbralas ahí y revisa las capturas.
+Número, titular, moneda y vencimiento los dibuja la app en las posiciones de `BpaPrint`, `BandecPrint` y `BanmetPrint` (`app/src/main/kotlin/dev/duardo/neotransfer/plus/ui/common/Cards.kt`), en fracciones del ancho y del alto de la tarjeta: si el arte cambia, recalíbralas ahí y revisa las capturas.
 
 ## Contribuir
 

@@ -2,6 +2,7 @@ package dev.duardo.neotransfer.plus.data.enzona
 
 import dev.duardo.neotransfer.plus.core.auth.EnzonaTokens
 import java.util.Base64
+import java.util.Collections
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Request
@@ -24,3 +25,10 @@ internal fun syntheticTokenBody(subject: String = "synthetic@carbon.super", acce
 }.toString()
 
 internal fun Request.bodyText(): String? = body?.let { body -> Buffer().also(body::writeTo).readUtf8() }
+
+/** Runs [block] with the diagnostic lines it writes to [EnzonaLog]; the sink is removed afterwards. */
+internal inline fun <T> collectingLog(block: (lines: List<String>) -> T): T {
+    val lines = Collections.synchronizedList(mutableListOf<String>())
+    EnzonaLog.sink = { _, line -> lines += line }
+    try { return block(lines) } finally { EnzonaLog.sink = null }
+}

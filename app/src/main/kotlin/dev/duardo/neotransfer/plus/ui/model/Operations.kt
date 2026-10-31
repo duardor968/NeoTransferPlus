@@ -5,10 +5,11 @@ import java.time.Instant
 
 /**
  * State of a movement. Sending: the single request is out. Unconfirmed: ENZONA did not prove the result in time
- * ("Sin confirmar"); it is checked against the history and never resent. NotSent: the request never left the phone.
+ * ("Sin confirmar"); it is checked against the history and never resent. NotSent: the request never reached ENZONA.
+ * NotDone: unconfirmed, and the person marked it as not done once the history did not have it.
  * Other: a state ENZONA reports that the app does not interpret; its own words are shown.
  */
-enum class OperationStatus { Sending, Confirmed, Pending, Rejected, Unconfirmed, NotSent, Other }
+enum class OperationStatus { Sending, Confirmed, Pending, Rejected, Unconfirmed, NotSent, NotDone, Other }
 
 enum class OperationKind(val incoming: Boolean = false) {
     CardTransfer,
@@ -27,7 +28,8 @@ enum class OperationKind(val incoming: Boolean = false) {
 /** The other side, as ENZONA identifies it. */
 @Immutable
 sealed interface CounterpartUi {
-    data class Card(val number: String, val bank: String? = null) : CounterpartUi
+    /** [issuer]: what the full number tells, `BANDEC · CUP`. */
+    data class Card(val number: String, val issuer: String? = null) : CounterpartUi
     /** Only the last four digits are known. */
     data class CardEnding(val last4: String, val bank: String? = null) : CounterpartUi
     data class Account(val username: String) : CounterpartUi
@@ -58,4 +60,6 @@ data class OperationUi(
     val dateText: String? = null,
     /** Bank channel of a card movement ("ATM", "POS", "ENZONA"). */
     val channel: String? = null,
+    /** Unconfirmed and missing from a history read made a day after it: the person may mark it as not done. */
+    val canMarkNotDone: Boolean = false,
 )

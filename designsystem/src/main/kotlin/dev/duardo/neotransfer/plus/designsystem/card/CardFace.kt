@@ -98,7 +98,7 @@ fun CardFace(
         Canvas(Modifier.matchParentSize()) {
             if (number.isNotEmpty()) printLine(measurer, number, layout.number, ink)
             holder?.takeIf { it.isNotBlank() }?.let { printLine(measurer, it.asPrinted(), layout.holder, ink) }
-            currency?.let { printLine(measurer, it, layout.currency, ink) }
+            currency?.let { printLine(measurer, it.uppercase(), layout.currency, ink) }
             expiry?.takeIf { it.isNotBlank() }?.let { printLine(measurer, "VENCE: $it", layout.expiry, ink) }
         }
         Box(Modifier.matchParentSize().cardFinish())
@@ -192,7 +192,7 @@ fun PlainCardFace(
             drawChip(Offset(0.075f * size.width, 0.300f * size.height), Size(0.125f * size.width, 0.095f * size.width))
             if (number.isNotEmpty()) printLine(measurer, number, PlainPrint.number, ink)
             holder?.takeIf { it.isNotBlank() }?.let { printLine(measurer, it.asPrinted(), PlainPrint.holder, ink) }
-            currency?.let { printLine(measurer, it, PlainPrint.currency, ink) }
+            currency?.let { printLine(measurer, it.uppercase(), PlainPrint.currency, ink) }
             expiry?.takeIf { it.isNotBlank() }?.let { printLine(measurer, "VENCE: $it", PlainPrint.expiry, ink.copy(alpha = 0.8f)) }
         }
         Box(Modifier.matchParentSize().cardFinish())

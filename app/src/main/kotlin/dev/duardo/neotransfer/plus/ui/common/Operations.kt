@@ -2,7 +2,6 @@ package dev.duardo.neotransfer.plus.ui.common
 
 import androidx.annotation.DrawableRes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
@@ -13,6 +12,7 @@ import dev.duardo.neotransfer.plus.designsystem.component.MoneySign
 import dev.duardo.neotransfer.plus.designsystem.component.MoneyText
 import dev.duardo.neotransfer.plus.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
+import dev.duardo.neotransfer.plus.designsystem.component.SeparatedText
 import dev.duardo.neotransfer.plus.designsystem.component.StatusChip
 import dev.duardo.neotransfer.plus.designsystem.component.StatusTone
 import dev.duardo.neotransfer.plus.designsystem.component.content
@@ -30,6 +30,7 @@ val OperationUi.statusText: String
         OperationStatus.Rejected -> "Rechazada"
         OperationStatus.Unconfirmed -> "Sin confirmar"
         OperationStatus.NotSent -> "No enviada"
+        OperationStatus.NotDone -> "No realizada"
         OperationStatus.Other -> statusLabel.orEmpty()
     }
 
@@ -39,7 +40,7 @@ val OperationStatus.tone: StatusTone
         OperationStatus.Confirmed -> StatusTone.Positive
         OperationStatus.Rejected -> StatusTone.Danger
         OperationStatus.Unconfirmed -> StatusTone.Warning
-        OperationStatus.NotSent, OperationStatus.Other -> StatusTone.Neutral
+        OperationStatus.NotSent, OperationStatus.NotDone, OperationStatus.Other -> StatusTone.Neutral
     }
 
 @get:DrawableRes
@@ -49,12 +50,12 @@ val OperationStatus.icon: Int
         OperationStatus.Confirmed -> Ds.drawable.ic_check_circle
         OperationStatus.Rejected -> Ds.drawable.ic_cancel
         OperationStatus.Unconfirmed -> Ds.drawable.ic_sync_problem
-        OperationStatus.NotSent -> Ds.drawable.ic_close
+        OperationStatus.NotSent, OperationStatus.NotDone -> Ds.drawable.ic_close
         OperationStatus.Other -> Ds.drawable.ic_info
     }
 
-/** Money that certainly did not move is shown struck through. */
-val OperationStatus.moneyMoved: Boolean get() = this != OperationStatus.Rejected && this != OperationStatus.NotSent
+/** Money that certainly did not move, or that the person says did not, is shown struck through. */
+val OperationStatus.moneyMoved: Boolean get() = this != OperationStatus.Rejected && this != OperationStatus.NotSent && this != OperationStatus.NotDone
 
 /** Nothing when ENZONA gave no state word at all. */
 @Composable
@@ -143,17 +144,17 @@ fun OperationAmount(operation: OperationUi, modifier: Modifier = Modifier) {
  * is added unless the operation is confirmed.
  */
 @Composable
-fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit, modifier: Modifier = Modifier, title: String = operation.title) {
     NeoRow(
-        title = operation.title,
+        title = title,
         modifier = modifier,
         leading = { OperationAvatar(operation) },
         supportingContent = {
             val status = operation.status
             val text = if (status == OperationStatus.Confirmed) timeLabel else listOf(timeLabel, operation.statusText).filter(String::isNotEmpty).joinToString(" · ")
-            Text(
+            SeparatedText(
                 text,
-                style = MaterialTheme.typography.bodyMedium,
+                MaterialTheme.typography.bodyMedium,
                 color = when (status.tone) {
                     StatusTone.Danger, StatusTone.Warning -> status.tone.content()
                     else -> MaterialTheme.colorScheme.onSurfaceVariant

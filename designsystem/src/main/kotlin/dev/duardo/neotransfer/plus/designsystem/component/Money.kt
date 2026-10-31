@@ -33,6 +33,8 @@ fun MoneyText(
     hero: Boolean = false,
 ) {
     val formatted = formatAmount(amount)
+    // ENZONA writes some currencies in lower case («cup»); they read as printed on the card.
+    val code = currency.uppercase()
     val prefix = if (sign == MoneySign.Plus) "+" else ""
     val muted = color.copy(alpha = if (hero) 0.55f else 0.7f)
     val text = buildAnnotatedString {
@@ -40,10 +42,10 @@ fun MoneyText(
             val cut = formatted.lastIndexOf(DecimalSeparator)
             append(prefix + formatted.substring(0, cut))
             withStyle(SpanStyle(fontSize = 0.62.em, color = muted)) { append(formatted.substring(cut)) }
-            withStyle(SpanStyle(fontSize = 0.42.em, fontWeight = FontWeight.Medium, color = muted)) { append(" $currency") }
+            withStyle(SpanStyle(fontSize = 0.42.em, fontWeight = FontWeight.Medium, color = muted)) { append(" $code") }
         } else {
             append(prefix + formatted)
-            withStyle(SpanStyle(fontSize = 0.8.em, fontWeight = FontWeight.Medium, color = muted)) { append(" $currency") }
+            withStyle(SpanStyle(fontSize = 0.8.em, fontWeight = FontWeight.Medium, color = muted)) { append(" $code") }
         }
     }
     Text(text, modifier, style = style, color = color, maxLines = 1, softWrap = false)

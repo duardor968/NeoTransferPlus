@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Small device choices: theme, and whether the first-start permission request already happened. */
+/** Small device choices: theme, and which first-start requests already happened. */
 class Preferences(context: Context) {
     private val preferences = context.getSharedPreferences("preferences", Context.MODE_PRIVATE)
     private val mutableAppearance = MutableStateFlow(
@@ -26,8 +26,16 @@ class Preferences(context: Context) {
         return true
     }
 
+    /** True once, also on installs that started before it existed: running with the app closed is asked about once. */
+    fun firstBackgroundAsk(): Boolean {
+        if (preferences.getBoolean(BACKGROUND_ASKED, false)) return false
+        preferences.edit().putBoolean(BACKGROUND_ASKED, true).apply()
+        return true
+    }
+
     private companion object {
         const val APPEARANCE = "appearance"
         const val PERMISSIONS_ASKED = "permissions_asked"
+        const val BACKGROUND_ASKED = "background_asked"
     }
 }

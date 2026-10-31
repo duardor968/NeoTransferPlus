@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -27,18 +29,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaLoginWeb
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionFailure
+import dev.duardo.neotransfer.plus.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.platform.BiometricGate
+import dev.duardo.neotransfer.plus.platform.autostartSettings
+import dev.duardo.neotransfer.plus.platform.batteryExemptionRequest
+import dev.duardo.neotransfer.plus.platform.ignoresBatteryOptimizations
+import dev.duardo.neotransfer.plus.platform.openAutostartSettings
 import dev.duardo.neotransfer.plus.ui.common.AppName
 import dev.duardo.neotransfer.plus.ui.common.NeoTransferPlusTheme
 import dev.duardo.neotransfer.plus.ui.lock.BrandBackdrop
@@ -50,6 +59,7 @@ import dev.duardo.neotransfer.plus.ui.model.LockUi
 import dev.duardo.neotransfer.plus.ui.model.LoginProblem
 import dev.duardo.neotransfer.plus.ui.model.LoginUi
 import dev.duardo.neotransfer.plus.ui.payment.PasswordSheet
+import dev.duardo.neotransfer.plus.ui.settings.AutostartSheet
 import kotlinx.coroutines.flow.first
 
 val LocalAuthorizer = staticCompositionLocalOf<Authorizer> { error("Authorizer missing") }
@@ -66,7 +76,12 @@ fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
             val session by plus.session.collectAsState()
             val locked by plus.locked.collectAsState()
             val snackbar = remember { SnackbarHostState() }
-            LaunchedEffect(plus) { plus.messages.collect { snackbar.showSnackbar(it) } }
+            LaunchedEffect(plus) {
+                plus.messages.collect { message ->
+                    val result = snackbar.showSnackbar(message.text, message.action, duration = SnackbarDuration.Short)
+                    if (result == SnackbarResult.ActionPerformed) message.onAction()
+                }
+            }
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 val needsLogin = !session.signedIn || session.failure == EnzonaSessionFailure.SIGN_IN_AGAIN ||
                     session.failure == EnzonaSessionFailure.RESTORE_FAILED
@@ -83,6 +98,9 @@ fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
                 SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 88.dp)) { data ->
                     Snackbar(
                         Modifier.padding(horizontal = NeoSpace.gutter),
+                        action = data.visuals.actionLabel?.let { label ->
+                            { NeoTextButton(label, data::performAction, color = MaterialTheme.colorScheme.inversePrimary) }
+                        },
                         shape = MaterialTheme.shapes.medium,
                         containerColor = MaterialTheme.colorScheme.inverseSurface,
                         contentColor = MaterialTheme.colorScheme.inverseOnSurface,
@@ -94,15 +112,44 @@ fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
     }
 }
 
-/** Every permission at once on the first start, straight from the system dialogs. */
+/**
+ * Every permission at once on the first start, straight from the system dialogs. Then, once, what lets the credit
+ * check run with the app closed: the exemption from battery optimization (system dialog) and, on phones that have
+ * one, their own autostart list.
+ */
 @Composable
 private fun FirstStartPermissions(plus: PlusApp) {
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+    val context = LocalContext.current
+    var offerAutostart by rememberSaveable { mutableStateOf(false) }
+    val battery = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        offerAutostart = context.ignoresBatteryOptimizations() && context.autostartSettings() != null
+    }
+    fun askBackground() {
+        if (!plus.preferences.firstBackgroundAsk()) return
+        when {
+            // A phone without the system dialog goes straight to its autostart list, if it has one.
+            !context.ignoresBatteryOptimizations() && runCatching { battery.launch(context.batteryExemptionRequest()) }.isSuccess -> Unit
+            context.autostartSettings() != null -> offerAutostart = true
+        }
+    }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        plus.readAddressBook()
+        askBackground()
+    }
     LaunchedEffect(Unit) {
         if (plus.preferences.firstStart()) {
             launcher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_CONTACTS))
+        } else {
+            askBackground()
         }
     }
+    if (offerAutostart) AutostartSheet(
+        onOpen = {
+            offerAutostart = false
+            if (!context.openAutostartSettings()) plus.say("No se pudo abrir el inicio automático")
+        },
+        onDismiss = { offerAutostart = false },
+    )
 }
 
 // ---- Lock ---------------------------------------------------------------------------------------------------
@@ -139,9 +186,11 @@ private fun EnzonaSessionFailure.problem(): LoginProblem = when (this) {
     EnzonaSessionFailure.ACCESS_DENIED -> LoginProblem.Denied
     EnzonaSessionFailure.SERVER_ERROR -> LoginProblem.ServerError
     EnzonaSessionFailure.SIGN_IN_AGAIN -> LoginProblem.Expired
+    EnzonaSessionFailure.TIMEOUT -> LoginProblem.Timeout
     EnzonaSessionFailure.UNAVAILABLE -> LoginProblem.Offline
     EnzonaSessionFailure.RESTORE_FAILED -> LoginProblem.RestoreFailed
     EnzonaSessionFailure.LOCAL_CLEAR_FAILED -> LoginProblem.ClearFailed
+    EnzonaSessionFailure.LOCAL_SAVE_FAILED -> LoginProblem.SaveFailed
 }
 
 /** ENZONA's own sign-in page inside the app; the callback never leaves the phone (see [EnzonaLoginWeb]). */

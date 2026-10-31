@@ -53,6 +53,8 @@ class EnzonaPaymentRequestsTest {
         currency = "CUP",
     )
 
+    /** A synthetic six-digit payment password. */
+    private fun pin(digits: String = "135790") = digits.toCharArray()
     private fun body(request: EnzonaPaymentRequest): JsonObject = Json.parseToJsonElement(request.json).jsonObject
     private fun JsonObject.text(key: String): String = getValue(key).jsonPrimitive.content
     private fun assertCleared(password: CharArray) = assertTrue(password.all { it == '\u0000' })
@@ -64,7 +66,7 @@ class EnzonaPaymentRequestsTest {
 
     @Test fun cardRequestEncryptsDestinationAndPasswordAndPreservesReviewedValues() {
         val draft = card()
-        val password = charArrayOf('f', 'i', 'x', 't', 'u', 'r', 'e', '-', 'ñ', '€')
+        val password = pin("482915")
         val expectedPassword = StandardCharsets.UTF_8.newEncoder()
             .encode(java.nio.CharBuffer.wrap(password)).let { buffer ->
                 ByteArray(buffer.remaining()).also(buffer::get)
@@ -93,7 +95,7 @@ class EnzonaPaymentRequestsTest {
 
     @Test fun accountRequestKeepsRecipientUsernameAndUuidSeparateAndDoesNotConvertCurrency() {
         val draft = account()
-        val password = charArrayOf('t', 'e', 's', 't')
+        val password = pin()
         val request = requests.encode(draft, password)
         assertCleared(password)
         val json = body(request)
@@ -119,7 +121,7 @@ class EnzonaPaymentRequestsTest {
             description = "texto\tcon\"escape",
             phone = "synthetic-phone",
         )
-        val password = charArrayOf('q', 'r', '-', 't', 'e', 's', 't')
+        val password = pin("314159")
         val request = requests.encode(draft, password)
         assertCleared(password)
         val json = body(request)
@@ -133,12 +135,12 @@ class EnzonaPaymentRequestsTest {
         assertEquals(draft.phone, json.text("phone"))
         assertEquals("1.2300", json.text("amount"))
         assertEquals("cup", json.text("currency"))
-        assertContentEquals("qr-test".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
+        assertContentEquals("314159".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
     }
 
     @Test fun decimalSerializationDoesNotUseFloatingPointRoundingOrScientificNotation() {
         val draft = account().copy(amount = BigDecimal("1E+20"), currency = "literal-origin-currency")
-        val json = body(requests.encode(draft, charArrayOf('t')))
+        val json = body(requests.encode(draft, pin()))
         assertEquals("100000000000000000000", json.text("amount"))
         assertEquals("literal-origin-currency", json.text("currency"))
         assertEquals("20.00", account().amount.toPlainString())
@@ -146,43 +148,45 @@ class EnzonaPaymentRequestsTest {
 
     @Test fun rsaPaddingIsRandomizedAndDoesNotMutateTheReviewedDraft() {
         val draft = card()
-        val first = body(requests.encode(draft, charArrayOf('s', 'a', 'm', 'e')))
-        val second = body(requests.encode(draft, charArrayOf('s', 'a', 'm', 'e')))
+        val first = body(requests.encode(draft, pin()))
+        val second = body(requests.encode(draft, pin()))
         assertNotEquals(first.text("payment_password"), second.text("payment_password"))
         assertNotEquals(first.text("pan"), second.text("pan"))
         assertContentEquals(decrypted(first.text("pan")), decrypted(second.text("pan")))
         assertEquals(card(), draft)
     }
 
-    @Test fun blockBoundaryUsesUtf8BytesAndPasswordIsClearedOnRejection() {
-        val exact = CharArray(245) { 'a' }
-        val json = body(requests.encode(account(), exact))
-        assertCleared(exact)
-        assertEquals(245, decrypted(json.text("payment_password")).size)
-        for (oversize in listOf(CharArray(246) { 'a' }, CharArray(123) { 'é' })) {
-            assertFailsWith<IllegalArgumentException> { requests.encode(account(), oversize) }
-            assertCleared(oversize)
+    @Test fun onlySixDigitsAreAPaymentPasswordAndAnythingElseIsClearedUnsent() {
+        for (typed in listOf("", "13579", "1357902", "13579a", "１３５７９０", "135 79", "\uD800\uD800\uD800")) {
+            val password = typed.toCharArray()
+            val error = assertFailsWith<IllegalArgumentException> { requests.encode(account(), password) }
+            assertEquals("El PIN de pago tiene 6 dígitos", error.message)
+            assertCleared(password)
         }
-        val unicodeBoundary = CharArray(244) { if (it == 0) 'é' else 'a' }
-        assertEquals(245, decrypted(body(requests.encode(account(), unicodeBoundary)).text("payment_password")).size)
-        assertCleared(unicodeBoundary)
+        val accepted = pin("000000")
+        assertContentEquals("000000".toByteArray(StandardCharsets.UTF_8), decrypted(body(requests.encode(account(), accepted)).text("payment_password")))
+        assertCleared(accepted)
+    }
+
+    @Test fun cipherBlockBoundaryUsesUtf8Bytes() {
+        val cipher = EnzonaCipher(pair.public as RSAPublicKey)
+        assertEquals(245, decrypted(cipher.encryptPassword(CharArray(245) { 'a' })).size)
+        for (oversize in listOf(CharArray(246) { 'a' }, CharArray(123) { 'é' })) {
+            assertFailsWith<IllegalArgumentException> { cipher.encryptPassword(oversize) }
+        }
+        assertEquals(245, decrypted(cipher.encryptPassword(CharArray(244) { if (it == 0) 'é' else 'a' })).size)
     }
 
     @Test fun blockBoundaryComesFromInjectedKeyModulusRatherThanTheBundledKeySize() {
         val smaller = KeyPairGenerator.getInstance("RSA").apply { initialize(1024) }.generateKeyPair()
-        val encoder = EnzonaPaymentRequests(EnzonaCipher(smaller.public as RSAPublicKey))
-        val accepted = CharArray(117) { 'a' }
-        val request = encoder.encode(account(), accepted)
-        assertCleared(accepted)
-        assertEquals(117, decrypted(body(request).text("payment_password"), smaller).size)
-        val rejected = CharArray(118) { 'a' }
-        assertFailsWith<IllegalArgumentException> { encoder.encode(account(), rejected) }
-        assertCleared(rejected)
+        val cipher = EnzonaCipher(smaller.public as RSAPublicKey)
+        assertEquals(117, decrypted(cipher.encryptPassword(CharArray(117) { 'a' }), smaller).size)
+        assertFailsWith<IllegalArgumentException> { cipher.encryptPassword(CharArray(118) { 'a' }) }
     }
 
     @Test fun invalidPanIsRejectedWithoutInventingDigitsOrKeepingThePassword() {
         for (pan in listOf("123456789012345", "12345678901234567", "1234-5678-9012-3456", "abcdefghijklmnop", "１２３４５６７８９０１２３４５６")) {
-            val password = charArrayOf('s', 'e', 'c', 'r', 'e', 't')
+            val password = pin()
             val error = assertFailsWith<IllegalArgumentException> { requests.encode(card().copy(recipientPan = pan), password) }
             assertCleared(password)
             assertEquals("La tarjeta destinataria debe contener 16 dígitos", error.message)
@@ -200,7 +204,7 @@ class EnzonaPaymentRequestsTest {
         val encoder = EnzonaPaymentRequests(EnzonaCipher(pair.public as RSAPublicKey, object : SecureRandom() {
             override fun nextBytes(bytes: ByteArray) { throw IllegalStateException("Synthetic crypto failure") }
         }))
-        val password = charArrayOf('t', 'e', 's', 't')
+        val password = pin()
         assertFailsWith<IllegalStateException> { encoder.encode(account(), password) }
         assertCleared(password)
     }
@@ -220,13 +224,13 @@ class EnzonaPaymentRequestsTest {
         assertEquals("EnzonaCardTransferDraft(redacted)", card().toString())
         assertEquals("EnzonaAccountTransferDraft(redacted)", account().toString())
         assertEquals("EnzonaQrMerchantPaymentDraft(redacted)", merchant.toString())
-        assertEquals("EnzonaPaymentRequest(redacted)", requests.encode(card(), charArrayOf('t')).toString())
+        assertEquals("EnzonaPaymentRequest(redacted)", requests.encode(card(), pin()).toString())
     }
 
     @Test fun electricityInvoiceHasIntegerCodeStringMetadataAndEncryptedPasswordOnlyOnWire() {
         val draft = EnzonaInvoicePaymentDraft(EnzonaInvoiceService.ELECTRICITY, "0000123", "Titular \"synthetic\"",
             "remote-card", BigDecimal("15.0000"), "cup", "local review only", "folio \"one\"", "route\\two", "202610")
-        val secret = charArrayOf('f', 'i', 'x', 't', 'u', 'r', 'e')
+        val secret = pin("246801")
         val request = requests.encode(draft, secret)
         assertCleared(secret)
         assertEquals("POST", request.method)
@@ -246,7 +250,7 @@ class EnzonaPaymentRequestsTest {
         assertEquals(draft.folio, metadata.text("folio"))
         assertEquals(draft.route, metadata.text("route"))
         assertEquals("202610", json.text("period"))
-        assertContentEquals("fixture".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
+        assertContentEquals("246801".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
         assertEquals("EnzonaInvoicePaymentDraft(redacted)", draft.toString())
     }
 
@@ -255,7 +259,7 @@ class EnzonaPaymentRequestsTest {
             EnzonaInvoiceService.NAUTA_HOME to "4445")) {
             val serviceName = "  synthetic-${service.name}@provider  "
             val draft = EnzonaInvoicePaymentDraft(service, serviceName, serviceName, "card-uuid", BigDecimal("123.4500"), "CUP")
-            val secret = charArrayOf('t', 'e', 's', 't')
+            val secret = pin()
             val request = requests.encode(draft, secret)
             assertCleared(secret)
             assertEquals(service, request.service)
@@ -266,7 +270,7 @@ class EnzonaPaymentRequestsTest {
             assertEquals(serviceName, json.text("client_id"))
             assertEquals(serviceName, json.text("owner"))
             assertEquals("123.4500", json.text("amount"))
-            assertContentEquals("test".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
+            assertContentEquals("135790".toByteArray(StandardCharsets.UTF_8), decrypted(json.text("payment_password")))
         }
     }
 
@@ -294,7 +298,7 @@ class EnzonaPaymentRequestsTest {
     @Test fun electricityDraftComesFromTheQueriedBillAndEncodesItsAmountFolioRouteAndPeriod() {
         val bill = dev.duardo.neotransfer.plus.core.service.EnzonaServiceJson.electricityBills(electricityLookup).single()
         val draft = EnzonaInvoicePaymentDraft.electricity(bill, "synthetic-card", "CUP")
-        val json = body(requests.encode(draft, charArrayOf('t')))
+        val json = body(requests.encode(draft, pin()))
         assertEquals("2222", json.text("service_code"))
         assertEquals("125.50", json.text("amount"))
         assertEquals("000000000001", json.text("client_id"))
@@ -306,13 +310,13 @@ class EnzonaPaymentRequestsTest {
     }
 
     @Test fun fixedPhoneAndTopUpsUseServiceNameRatherThanNumberAndNeverPayDebtByInference() {
-        val fixed = body(requests.encode(EnzonaInvoicePaymentDraft.fixedPhone(etecsa("tb"), "card", "CUP"), charArrayOf('t')))
+        val fixed = body(requests.encode(EnzonaInvoicePaymentDraft.fixedPhone(etecsa("tb"), "card", "CUP"), pin()))
         assertEquals("4441", fixed.text("service_code"))
         assertEquals("80.00", fixed.text("amount"))
         for (type in listOf("nauta", "adsl_nauta")) {
             val account = etecsa(type)
             assertEquals(BigDecimal("50.00"), account.currentDebt)
-            val request = requests.encode(EnzonaInvoicePaymentDraft.nautaTopUp(account, BigDecimal("250.75"), "card", "CUP"), charArrayOf('t'))
+            val request = requests.encode(EnzonaInvoicePaymentDraft.nautaTopUp(account, BigDecimal("250.75"), "card", "CUP"), pin())
             val json = body(request)
             assertEquals(if (type == "nauta") "4443" else "4445", json.text("service_code"))
             assertEquals("250.75", json.text("amount"))

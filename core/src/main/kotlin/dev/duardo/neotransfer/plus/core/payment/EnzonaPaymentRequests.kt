@@ -31,6 +31,11 @@ class EnzonaPaymentRequest internal constructor(
 
 /** Password branch traced at 0x7af5dc, 0x8f08cc, 0x8c694c and the invoice forms in ENZONA 1.11.0. */
 class EnzonaPaymentRequests(private val cipher: EnzonaCipher) {
+    companion object {
+        /** ENZONA's payment password: exactly six digits ("La contraseña de pago debe tener 6 dígitos"). */
+        const val PASSWORD_DIGITS = 6
+    }
+
     /** Consumes password: the supplied array is cleared on success and on every failure. */
     fun encode(draft: EnzonaPaymentDraft, password: CharArray): EnzonaPaymentRequest {
         try {
@@ -55,7 +60,9 @@ class EnzonaPaymentRequests(private val cipher: EnzonaCipher) {
                     } else require(draft.clientId == draft.owner) { "Los datos de la cuenta ETECSA no coinciden" }
                 }
             }
-            require(password.isNotEmpty()) { "La contraseña de pago está vacía" }
+            require(password.size == PASSWORD_DIGITS && password.all { it in '0'..'9' }) {
+                "El PIN de pago tiene $PASSWORD_DIGITS dígitos"
+            }
             val encryptedPan = if (draft is EnzonaCardTransferDraft) {
                 val pan = draft.recipientPan.replace(" ", "")
                 require(pan.length == 16 && pan.all { it in '0'..'9' }) { "La tarjeta destinataria debe contener 16 dígitos" }
