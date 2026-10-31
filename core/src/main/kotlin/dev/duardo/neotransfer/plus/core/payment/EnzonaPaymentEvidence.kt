@@ -55,7 +55,7 @@ class EnzonaPaymentEvidence(
     val uuid: String?,
     val observedAt: Long,
     val serviceResult: EnzonaServicePaymentResult? = null,
-    /** ENZONA explained an error. Its words are evidence of the reply only, never of a rejection. */
+    /** ENZONA explained an error; with a 4xx it refused the payment unless it named a transaction ([EnzonaPaymentJson.evidence]). */
     val fault: EnzonaPaymentFault? = null,
 ) {
     init { require(state in setOf(EnzonaIntentState.CONFIRMED, EnzonaIntentState.REJECTED, EnzonaIntentState.UNKNOWN)) }
@@ -66,8 +66,9 @@ object EnzonaPaymentJson {
     /**
      * HTTP 200 alone proves nothing. Transfers confirm only on `status_code` "1111" (card transfers also
      * accept the traced camelCase `statusCode`); merchant payments never confirm from the reply; invoices
-     * use their own family states. Everything else is UNKNOWN, never REJECTED by inference: a `fault` is decoded
-     * (code, words, and the `status_code` and `transaction_uuid` it may carry) and stays UNKNOWN.
+     * use their own family states. A `fault` with a 4xx is ENZONA refusing the request, REJECTED, when it created no
+     * transaction or names it rejected (`status_code` 1112); one that names a transaction stays UNKNOWN until the history
+     * read that follows settles it by its uuid. Code, words, `status_code` and `transaction_uuid` are kept.
      */
     fun evidence(request: EnzonaPaymentRequest, httpStatus: Int, body: String, observedAt: Long): EnzonaPaymentEvidence {
         val root = try { Json.parseToJsonElement(body) as? JsonObject } catch (_: IllegalArgumentException) { null }
@@ -91,10 +92,16 @@ object EnzonaPaymentJson {
         fun id(row: JsonObject?, name: String) = (row?.get(name) as? JsonPrimitive)?.takeIf { it.isString }?.content
             ?.takeIf { it.isNotBlank() && it.none(Char::isISOControl) }
         val confirmed = httpStatus == 200 && !error && request.path != EnzonaPaymentRequest.MERCHANT && code == "1111"
+        val statusCode = code ?: faultRow?.let { code(it["status_code"]) }
+        val transaction = id(root, "transaction_uuid") ?: id(faultRow, "transaction_uuid")
+        val refused = fault != null && httpStatus in 400..499 && (transaction == null || statusCode == "1112")
         return EnzonaPaymentEvidence(
-            if (confirmed) EnzonaIntentState.CONFIRMED else EnzonaIntentState.UNKNOWN,
-            httpStatus, code ?: faultRow?.let { code(it["status_code"]) },
-            id(root, "transaction_uuid") ?: id(faultRow, "transaction_uuid"), id(root, "uuid"), observedAt, fault = fault,
+            when {
+                confirmed -> EnzonaIntentState.CONFIRMED
+                refused -> EnzonaIntentState.REJECTED
+                else -> EnzonaIntentState.UNKNOWN
+            },
+            httpStatus, statusCode, transaction, id(root, "uuid"), observedAt, fault = fault,
         )
     }
 

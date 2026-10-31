@@ -36,11 +36,6 @@ internal interface EnzonaLocalStore : EnzonaPaymentJournal {
     fun observeJournal(owner: String): Flow<List<EnzonaJournalEntry>>
     /** Applies what the history says of UNKNOWN attempts ([EnzonaReconciliation]); anything else is left as it is. */
     suspend fun reconcile(owner: String, changes: List<EnzonaReconciliationChange>)
-    /**
-     * The person's own resolution of an UNKNOWN attempt that a history read at least [EnzonaReconciliation.AFTER] after
-     * it did not find. The state stays UNKNOWN; false when it does not qualify.
-     */
-    suspend fun markNotDone(owner: String, id: String, at: Long): Boolean
     /** Erases the owner's cached reads, history and card links. Never touches the payment journal. */
     suspend fun clearOwner(owner: String)
 }
@@ -111,9 +106,6 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
             }
         }
     }
-
-    override suspend fun markNotDone(owner: String, id: String, at: Long) =
-        database.withTransaction { dao.markNotDone(checkOwner(owner), id, at, EnzonaReconciliation.AFTER) == 1 }
 
     override suspend fun clearOwner(owner: String) {
         checkOwner(owner)

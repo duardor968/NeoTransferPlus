@@ -141,10 +141,6 @@ internal interface EnzonaDao {
 
     @Query("UPDATE intent_journal SET notFoundAt = :at WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN'")
     fun notFoundInHistory(owner: String, id: String, at: Long): Int
-
-    @Query("""UPDATE intent_journal SET markedNotDoneAt = :at WHERE ownerSubject = :owner AND id = :id AND state = 'UNKNOWN'
-        AND markedNotDoneAt IS NULL AND notFoundAt >= preparedAt + :wait""")
-    fun markNotDone(owner: String, id: String, at: Long, wait: Long): Int
 }
 
 /** v2 keeps what ENZONA answered to each attempt and what its history says of it; every v1 row stays as it was. */

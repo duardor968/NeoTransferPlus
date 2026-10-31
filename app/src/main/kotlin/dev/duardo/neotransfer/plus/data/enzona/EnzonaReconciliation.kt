@@ -37,6 +37,8 @@ internal object EnzonaReconciliation {
     const val FAILED = 1112
     const val BEFORE = 2 * 60_000L
     const val AFTER = 24 * 60 * 60_000L
+    /** A history read this long after an unconfirmed attempt, without its row, settles it as not done. */
+    const val NOT_DONE_AFTER = 15 * 60_000L
 
     /**
      * [ownLast4]: last four digits of each own card by its uuid. [read]: the dates the last history read asked for,

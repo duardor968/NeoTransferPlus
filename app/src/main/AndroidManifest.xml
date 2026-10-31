@@ -10,12 +10,18 @@
     <!-- The system dialog that lets the periodic credit check run with the app closed. Not a Play app. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:ignore="BatteryLife" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- Saved contacts and cards shared with NeoTransfer, both signed with the same key. -->
+    <permission
+        android:name="dev.duardo.neotransfer.permission.SYNC_CONTACTS"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="dev.duardo.neotransfer.permission.SYNC_CONTACTS" />
 
     <queries>
         <!-- Transsion's "Inicio automático" list (TECNO), offered when the phone has it. -->
         <intent>
             <action android:name="com.cyin.himgr.applicationmanager.view.activities.AUTO_START_ACTIVITY" />
         </intent>
+        <provider android:authorities="dev.duardo.neotransfer.contacts" />
     </queries>
 
     <application
@@ -55,6 +61,11 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_files" />
         </provider>
+        <provider
+            android:name=".data.contacts.ContactsProvider"
+            android:authorities="${applicationId}.contacts"
+            android:exported="true"
+            android:readPermission="dev.duardo.neotransfer.permission.SYNC_CONTACTS" />
         <!-- Bundled ML Kit sends usage reports to Google through datatransport. Without this service its
              backend is never registered, so every report is dropped before it is stored or sent.
              The class only reaches the app at runtime, through :scanner, hence MissingClass. -->

@@ -163,7 +163,6 @@ fun OperationRoute(plus: PlusApp, key: String) {
     val journal by plus.journal.collectAsState()
     val wallet by plus.wallet.collectAsState()
     val clock = LocalClock.current
-    var confirmingNotDone by remember { mutableStateOf(false) }
     val loaded = when (key.substringBefore(':')) {
         "tx" -> transactions != null
         "j" -> journal != null
@@ -182,17 +181,9 @@ fun OperationRoute(plus: PlusApp, key: String) {
             override fun share() = context.shareText(receiptText(operation, TimeLabels(clock)), "Compartir comprobante")
             override fun refresh() = plus.refresh()
             override fun changePassword() = plus.nav.push(Dest.PasswordSettings)
-            override fun markNotDone() { confirmingNotDone = true }
-            override fun confirmNotDone() {
-                confirmingNotDone = false
-                plus.scope.launch {
-                    if (!plus.markNotDone(key.substringAfter(':'))) plus.say("No se pudo marcar. Actualiza la actividad e inténtalo de nuevo.")
-                }
-            }
-            override fun cancelNotDone() { confirmingNotDone = false }
         }
     }
-    OperationDetailScreen(operation, actions, refreshing = refresh == RefreshState.Refreshing, confirmingNotDone = confirmingNotDone)
+    OperationDetailScreen(operation, actions, refreshing = refresh == RefreshState.Refreshing)
 }
 
 /** The receipt as plain text: what, who, how much, state and the same lines as on screen. */

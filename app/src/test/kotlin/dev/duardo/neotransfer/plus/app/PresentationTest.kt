@@ -23,6 +23,7 @@ import dev.duardo.neotransfer.plus.data.enzona.EnzonaHistoryMatch
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntentType
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaJournalEntry
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaReconciliation
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentNotice
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionFailure
 import dev.duardo.neotransfer.plus.designsystem.component.KeypadKey
@@ -182,6 +183,32 @@ class PresentationTest {
         assertEquals(CounterpartUi.Reference("01234567891"), ui.counterpart)
     }
 
+    @Test fun aTransferSentFromHereIsToldByWhatThePhoneSentNotAsAService() {
+        // ENZONA's row of a card transfer: "not applicable" markers as false, no recipient.
+        val history = listOf(tx("""{"transaction_uuid":"r9","amount":"10","client_id":false,"invoice":false,"transaction_denom":"Transferencia","status_denom":"Aceptada"}"""))
+        val juan = Contact("j", "Juan", listOf(ContactCard("jc", "9205990144718265", null)), emptyList())
+        val sent = entry("00000000-0000-4000-8000-000000000009", EnzonaIntentType.CARD_TRANSFER, "9205990144718265", EnzonaIntentState.CONFIRMED, 1_000, remoteId = "r9")
+        val row = accountActivity(history, listOf(sent), "me", listOf(bpa), listOf(juan), havana, withPending = false).single()
+        assertEquals(OperationKind.CardTransfer, row.kind)
+        assertEquals("Juan", row.title)
+        assertEquals("j", row.contactId)
+        assertEquals(OperationStatus.Confirmed, row.status)
+        assertEquals(OperationKind.CardTransfer, history.single().toUi("me", emptyList(), havana).kind)
+    }
+
+    @Test fun aPaymentConfirmedByItsReplyFindsItsRowByAmountAndTime() {
+        // No uuid ties them, and ENZONA writes `false` where it has no recipient name.
+        val history = listOf(tx("""{"transaction_uuid":"r10","amount":"10","transaction_denom":"Transferencia","status_denom":"Aceptada",
+            "transaction_created_at":"2026-10-15 10:02:00","recipient":{"funding_recipient_name":false,"funding_recipient_lastname":false}}"""))
+        val sentAt = java.time.LocalDateTime.of(2026, 10, 15, 10, 0).atZone(havana).toInstant().toEpochMilli()
+        val juan = Contact("j", "Juan", listOf(ContactCard("jc", "9205990144718265", null)), emptyList())
+        fun sent(amount: String) = entry("00000000-0000-4000-8000-000000000010", EnzonaIntentType.CARD_TRANSFER, "9205990144718265",
+            EnzonaIntentState.CONFIRMED, sentAt).let { it.copy(intent = it.intent.copy(amount = amount)) }
+        assertEquals("Juan", accountActivity(history, listOf(sent("10")), "me", listOf(bpa), listOf(juan), havana).single().title)
+        val other = accountActivity(history, listOf(sent("11")), "me", listOf(bpa), listOf(juan), havana).single()
+        assertEquals("Transferencia", other.title)
+    }
+
     @Test fun activityShowsUnconfirmedPaymentsUntilTheHistoryHasThem() {
         val history = listOf(tx("""{"transaction_uuid":"r1","amount":"300","recipient":{"funding_recipient_last4":"8265"},"transaction_created_at":"2026-10-15 10:00:00"}"""))
         val journal = listOf(
@@ -225,19 +252,18 @@ class PresentationTest {
         assertEquals("ENZONA respondió: “Saldo insuficiente”.", ui(base.copy(state = EnzonaIntentState.REJECTED, faultText = "Saldo insuficiente")).reason)
     }
 
-    @Test fun aDayWithoutItsRowInTheHistoryLetsThePersonMarkItNotDone() {
-        val day = 24 * 60 * 60_000L
+    @Test fun aQuarterHourWithoutItsRowInTheHistoryMeansNotDone() {
+        val wait = EnzonaReconciliation.NOT_DONE_AFTER
         val base = entry("00000000-0000-4000-8000-000000000007", EnzonaIntentType.CARD_TRANSFER, "9205990144718265", EnzonaIntentState.UNKNOWN, 1_000)
         fun ui(entry: EnzonaJournalEntry) = entry.toUi(listOf(bpa), emptyList())
-        assertFalse(ui(base.copy(notFoundAt = 1_000 + day - 1)).canMarkNotDone)
-        val missing = ui(base.copy(notFoundAt = 1_000 + day))
-        assertTrue(missing.canMarkNotDone)
-        assertEquals("No aparece en tu historial de ENZONA. Si el saldo no bajó, no se movió dinero.", missing.reason)
-        val marked = base.copy(notFoundAt = 1_000 + day, markedNotDoneAt = 2_000 + day)
+        assertEquals(OperationStatus.Unconfirmed, ui(base.copy(notFoundAt = 1_000 + wait - 1)).status)
+        val missing = base.copy(notFoundAt = 1_000 + wait)
+        assertEquals(OperationStatus.NotDone, ui(missing).status)
+        assertEquals("ENZONA no la registró. No se movió dinero.", ui(missing).reason)
+        val marked = base.copy(markedNotDoneAt = 2_000)
         assertEquals(OperationStatus.NotDone, ui(marked).status)
-        assertFalse(ui(marked).canMarkNotDone)
         // Off Home, still in Activity, and never tied to a contact as money sent.
-        assertTrue(inProgress(listOf(marked), emptySet(), listOf(bpa), emptyList(), 3_000 + day).isEmpty())
+        assertTrue(inProgress(listOf(missing, marked), emptySet(), listOf(bpa), emptyList(), 3_000 + wait).isEmpty())
         assertEquals(OperationStatus.NotDone, accountActivity(emptyList(), listOf(marked), "me", listOf(bpa), emptyList(), havana).single().status)
         val juan = Contact("j", "Juan", listOf(ContactCard("jc", "9205990144718265", null)), emptyList())
         assertTrue(contactMovements(listOf(marked), emptyList(), "me", listOf(bpa), listOf(juan), havana).isEmpty())

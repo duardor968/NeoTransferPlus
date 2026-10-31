@@ -200,7 +200,6 @@ private fun AccountCardRow(account: AccountCardUi, menuOpen: Boolean, actions: S
     val card = account.card
     NeoRow(
         card.numberLine,
-        fitTitle = true,
         supporting = listOfNotNull(issuerOf(card.bank, card.currency), "Predeterminada".takeIf { account.primary }).joinToString(" · "),
         leading = { CardThumb(card) },
         trailing = {

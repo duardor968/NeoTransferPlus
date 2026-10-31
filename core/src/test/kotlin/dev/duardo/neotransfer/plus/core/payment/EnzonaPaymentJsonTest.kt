@@ -44,10 +44,13 @@ class EnzonaPaymentJsonTest {
         assertNull(onlyUuid.transactionUuid)
     }
 
-    @Test fun aFaultIsDecodedForTheRecordButStaysUnknown() {
+    @Test fun aFourHundredFaultRefusesThePaymentUnlessItNamesATransactionNotRejected() {
+        assertEquals(EnzonaIntentState.REJECTED, decode(card, """{"fault":{"cod":"0507","description":"Contraseña de pago incorrecta"}}""", 400).state)
+        assertEquals(EnzonaIntentState.UNKNOWN, decode(card, """{"fault":{"cod":"0507"},"transaction_uuid":"t"}""", 400).state)
+        assertEquals(EnzonaIntentState.UNKNOWN, decode(card, """{"fault":{"cod":"0507"}}""", 503).state)
         val evidence = decode(card, """{"fault":{"cod":"0507","message":"Error","description":"Contraseña\nde pago\u0007  incorrecta",
             "transaction_uuid":"fault-id","status_code":"1112","extra":"ignored"}}""", 400)
-        assertEquals(EnzonaIntentState.UNKNOWN, evidence.state)
+        assertEquals(EnzonaIntentState.REJECTED, evidence.state)
         assertEquals("0507", evidence.fault!!.code)
         assertEquals("Contraseña de pago incorrecta", evidence.fault!!.text)
         assertEquals(listOf("cod", "message", "description", "status_code", "transaction_uuid"), evidence.fault!!.fields)

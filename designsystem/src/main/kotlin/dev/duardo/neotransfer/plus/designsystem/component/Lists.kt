@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -21,11 +22,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.takeOrElse
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
@@ -76,8 +77,8 @@ fun Modifier.groupItem(index: Int, count: Int): Modifier {
 /**
  * The single row of the system: leading slot (44 dp), title, optional supporting line, trailing slot.
  * Used by every list so spacing, ripple and alignment are identical everywhere. With [trailingBelowWhenLarge],
- * large font scales move the trailing element under the text so names keep the width. [fitTitle] keeps an
- * identifier title on one line.
+ * large font scales move the trailing element under the text so names keep the width. The title stays on one
+ * line, stepping down in size; [wrapTitle] lets a sentence take two lines instead.
  */
 @Composable
 fun NeoRow(
@@ -90,7 +91,7 @@ fun NeoRow(
     titleColor: Color = Color.Unspecified,
     supportingContent: (@Composable () -> Unit)? = null,
     trailingBelowWhenLarge: Boolean = false,
-    fitTitle: Boolean = false,
+    wrapTitle: Boolean = false,
 ) {
     val trailingBelow = trailingBelowWhenLarge && LocalDensity.current.fontScale >= 1.3f
     Row(
@@ -105,9 +106,13 @@ fun NeoRow(
         leading?.invoke()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val titleStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium)
-            // Identifiers (card numbers) stay on one line and step down in size instead of breaking mid-group.
-            if (fitTitle) FittedText(title, titleStyle, color = titleColor.takeOrElse { LocalContentColor.current }, minScale = 0.6f)
-            else Text(title, style = titleStyle, color = titleColor)
+            val color = titleColor.takeOrElse { LocalContentColor.current }
+            if (wrapTitle) {
+                Text(title, style = titleStyle, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } else {
+                // One line: a name or a card number steps down before it ellipsizes, and never breaks inside a group.
+                FittedText(title, titleStyle, color = color, minScale = 0.8f)
+            }
             when {
                 supportingContent != null -> supportingContent()
                 supporting != null -> SeparatedText(supporting, MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

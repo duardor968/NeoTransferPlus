@@ -181,10 +181,9 @@ object PreviewCatalog {
         "operation-incoming" to { OperationDetailScreen(PreviewData.incomingFromDaniela, noop()) },
         "operation-qr" to { OperationDetailScreen(PreviewData.qrCafe, noop()) },
         "operation-unconfirmed" to { OperationDetailScreen(PreviewData.unconfirmedToYunior, noop()) },
-        "operation-unconfirmed-missing" to { OperationDetailScreen(missing, noop()) },
-        "operation-not-done-confirm" to { OperationDetailScreen(missing, noop(), confirmingNotDone = true) },
+        "operation-not-done-missing" to { OperationDetailScreen(missing, noop()) },
         "operation-not-done" to {
-            OperationDetailScreen(missing.copy(status = OperationStatus.NotDone, reason = MarkedNotDoneReason, canMarkNotDone = false), noop())
+            OperationDetailScreen(missing.copy(status = OperationStatus.NotDone, reason = MarkedNotDoneReason), noop())
         },
         "operation-rejected" to { OperationDetailScreen(PreviewData.landlineRejected, noop()) },
         "operation-other" to { OperationDetailScreen(PreviewData.nauta, noop()) },
@@ -482,8 +481,8 @@ private fun savedElectricity() = ServiceFormUi(
 
 private fun receive() = ReceiveUi(PreviewData.ownQrPayload, null, "CUP", PreviewData.account.name, PreviewData.account.username)
 
-/** A transfer still unconfirmed a day later, missing from the history read since. */
-private val missing = PreviewData.unconfirmedToYunior.copy(at = PreviewData.at(2, 10, 5), reason = NotInHistoryReason, canMarkNotDone = true)
+/** A transfer ENZONA never answered, missing from the history read a quarter hour later: not done. */
+private val missing = PreviewData.unconfirmedToYunior.copy(at = PreviewData.at(2, 10, 5), status = OperationStatus.NotDone, reason = NotInHistoryReason)
 
 private fun settings() =
     SettingsUi(PreviewData.account, passwordSaved = true, Theme.System, notifications = true, version = "0.1.0", cards = PreviewData.accountCards)

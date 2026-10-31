@@ -90,15 +90,10 @@ class EnzonaMigrationTest {
             assertEquals("Contraseña de pago incorrecta", replied.faultText)
             assertFalse(store.markNotDelivered(owner, unknown))
 
-            // Missing from the history a day later: the person may mark it; a row that shows up undoes the mark.
-            val day = EnzonaReconciliation.AFTER
-            store.reconcile(owner, listOf(EnzonaReconciliationChange.NotFound(unknown, 1000 + day - 1)))
-            assertFalse(store.markNotDone(owner, unknown, 1000 + day))
-            store.reconcile(owner, listOf(EnzonaReconciliationChange.NotFound(unknown, 1000 + day)))
-            assertTrue(store.markNotDone(owner, unknown, 2000 + day))
-            assertEquals(2000 + day, store.intent(owner, unknown)!!.markedNotDoneAt)
+            // Missing from the history, then a row shows up: the miss is undone.
+            store.reconcile(owner, listOf(EnzonaReconciliationChange.NotFound(unknown, 1000 + EnzonaReconciliation.NOT_DONE_AFTER)))
+            assertEquals(1000 + EnzonaReconciliation.NOT_DONE_AFTER, store.intent(owner, unknown)!!.notFoundAt)
             store.reconcile(owner, listOf(EnzonaReconciliationChange.Seen(unknown)))
-            assertNull(store.intent(owner, unknown)!!.markedNotDoneAt)
             assertNull(store.intent(owner, unknown)!!.notFoundAt)
 
             // Only its own uuid settles it.

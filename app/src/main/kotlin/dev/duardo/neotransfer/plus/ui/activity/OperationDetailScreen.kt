@@ -52,12 +52,8 @@ interface OperationActions {
     fun back()
     fun share()
     fun refresh()
-    /** Ajustes › Contraseña de pago. */
+    /** Ajustes › PIN de pago. */
     fun changePassword()
-    /** Asks first ([OperationDetailScreen]'s `confirmingNotDone`). */
-    fun markNotDone()
-    fun confirmNotDone()
-    fun cancelNotDone()
 }
 
 /**
@@ -71,7 +67,6 @@ fun OperationDetailScreen(
     actions: OperationActions,
     modifier: Modifier = Modifier,
     refreshing: Boolean = false,
-    confirmingNotDone: Boolean = false,
 ) {
     Scaffold(
         modifier,
@@ -94,7 +89,6 @@ fun OperationDetailScreen(
                 when (operation.status) {
                     OperationStatus.Unconfirmed -> {
                         NeoButton("Actualizar actividad", actions::refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh, loading = refreshing)
-                        if (operation.canMarkNotDone) NeoTextButton("Marcar como no realizada", actions::markNotDone, Modifier.fillMaxWidth())
                         NeoTextButton("Cambiar PIN de pago", actions::changePassword, Modifier.fillMaxWidth())
                     }
                     OperationStatus.Sending, OperationStatus.NotSent, OperationStatus.Rejected, OperationStatus.NotDone -> Unit
@@ -103,14 +97,6 @@ fun OperationDetailScreen(
             }
         }
     }
-    if (confirmingNotDone) NeoConfirmSheet(
-        title = "¿Marcar como no realizada?",
-        text = "Hazlo solo si el saldo de la tarjeta no bajó. Si aparece en tu historial de ENZONA, vuelve a «Sin confirmar».",
-        confirm = "Marcar como no realizada",
-        dismiss = "Cancelar",
-        onConfirm = actions::confirmNotDone,
-        onDismiss = actions::cancelNotDone,
-    )
 }
 
 @Composable

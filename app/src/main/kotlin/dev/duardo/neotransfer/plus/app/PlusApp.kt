@@ -10,8 +10,10 @@ import dev.duardo.neotransfer.plus.data.EnzonaFailure
 import dev.duardo.neotransfer.plus.data.contacts.Contact
 import dev.duardo.neotransfer.plus.data.contacts.ContactsStore
 import dev.duardo.neotransfer.plus.data.contacts.Directory
+import dev.duardo.neotransfer.plus.data.contacts.PeerContacts
 import dev.duardo.neotransfer.plus.data.contacts.PhoneContact
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
+import dev.duardo.neotransfer.plus.data.enzona.EnzonaLog
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentApproval
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentAuthorizationExpiredException
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentNotice
@@ -106,11 +108,12 @@ class PlusApp(context: Context) {
 
     /**
      * Reads the address book (on each return to the app and after READ_CONTACTS is granted) and moves the cards kept
-     * for someone onto their entry in it ([Directory.link]).
+     * for someone onto their entry in it ([Directory.link]); first takes in what changed in NeoTransfer ([pullPeer]).
      */
     fun readAddressBook() {
         scope.launch {
             agendaLock.withLock {
+                pullPeer()
                 val people = withContext(Dispatchers.IO) {
                     try {
                         phoneBook.read()
@@ -124,6 +127,20 @@ class PlusApp(context: Context) {
                 }
                 agenda.value = Agenda(people)
             }
+        }
+    }
+
+    /**
+     * Takes in the contacts and cards added, changed or deleted in NeoTransfer ([ContactsStore.merge]); [contactList]
+     * follows by itself. Without NeoTransfer, or one signed with another key, nothing happens.
+     */
+    private suspend fun pullPeer() {
+        try {
+            val changed = withContext(Dispatchers.IO) { PeerContacts.read(app)?.let { contacts.merge(it) } }
+            if (changed != null && changed > 0) EnzonaLog.info("contacts sync: $changed from peer")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
         }
     }
 
@@ -299,9 +316,6 @@ class PlusApp(context: Context) {
             }
         }
     }
-
-    /** True when [intentId] is now marked as not done (see [dev.duardo.neotransfer.plus.data.EnzonaRepository.markNotDone]). */
-    suspend fun markNotDone(intentId: String): Boolean = repository.markNotDone(intentId)
 
     // Payment password -------------------------------------------------------------------------------------------
 

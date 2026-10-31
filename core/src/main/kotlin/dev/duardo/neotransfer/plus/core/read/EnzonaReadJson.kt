@@ -111,27 +111,27 @@ object EnzonaReadJson {
     private fun transaction(row: JsonObject) = EnzonaTransaction(
         transactionUuid = row.requiredId("transaction_uuid"),
         owner = row.loose("owner"),
-        clientId = row.text("client_id"),
-        invoice = row.text("invoice"),
-        invoiceNumber = row.text("invoice_number"),
-        merchantAlias = row.text("merchant_alias"),
-        merchantAvatar = row.text("merchant_avatar"),
-        merchantName = row.text("merchant_name"),
+        clientId = row.label("client_id"),
+        invoice = row.label("invoice"),
+        invoiceNumber = row.label("invoice_number"),
+        merchantAlias = row.label("merchant_alias"),
+        merchantAvatar = row.label("merchant_avatar"),
+        merchantName = row.label("merchant_name"),
         statusCode = row.int("status_code"),
         transactionStatusCode = row.int("transaction_status_code"),
         transactionStatus = row.text("transaction_status"),
         createdAt = row.date("transaction_created_at"),
         signature = row.text("transaction_signature"),
-        period = row.text("period"),
+        period = row.label("period"),
         amount = row.decimal("amount"),
         totalAmount = row.decimal("total_amount"),
         currency = row.currency(),
-        transactionDenomination = row.text("transaction_denom"),
+        transactionDenomination = row.label("transaction_denom"),
         statusDenomination = row.text("status_denom"),
         transactionCode = row.int("transaction_code"),
         barcode = row.boolean("barcode"),
-        donationTitle = row.text("donation_title"),
-        description = row.text("transaction_description"),
+        donationTitle = row.label("donation_title"),
+        description = row.label("transaction_description"),
         source = row.optionalObject("source")?.let(::source),
         recipient = row.optionalObject("recipient")?.let(::recipient),
         metadata = row["metadata"],
@@ -140,30 +140,30 @@ object EnzonaReadJson {
     )
 
     private fun source(row: JsonObject) = EnzonaTransactionSource(
-        last4 = row.text("funding_source_last4"),
+        last4 = row.label("funding_source_last4"),
         bank = row.int("funding_source_bank"),
-        avatar = row.text("funding_source_avatar"),
-        name = row.text("funding_source_name"),
-        lastName = row.text("funding_source_lastname"),
-        username = row.text("funding_source_username"),
+        avatar = row.label("funding_source_avatar"),
+        name = row.label("funding_source_name"),
+        lastName = row.label("funding_source_lastname"),
+        username = row.label("funding_source_username"),
         amount = row.decimal("funding_source_amount"),
         verified = row.int("funding_source_verified"),
-        merchantAlias = row.text("merchant_alias"),
-        merchantAvatar = row.text("merchant_avatar"),
+        merchantAlias = row.label("merchant_alias"),
+        merchantAvatar = row.label("merchant_avatar"),
         original = row,
     )
 
     private fun recipient(row: JsonObject) = EnzonaTransactionRecipient(
-        last4 = row.text("funding_recipient_last4"),
+        last4 = row.label("funding_recipient_last4"),
         bank = row.text("funding_recipient_bank"),
-        avatar = row.text("funding_recipient_avatar"),
-        name = row.text("funding_recipient_name"),
-        lastName = row.text("funding_recipient_lastname"),
-        username = row.text("funding_recipient_username"),
+        avatar = row.label("funding_recipient_avatar"),
+        name = row.label("funding_recipient_name"),
+        lastName = row.label("funding_recipient_lastname"),
+        username = row.label("funding_recipient_username"),
         verified = row.text("funding_recipient_verified"),
-        donationTitle = row.text("donation_title"),
-        merchantAlias = row.text("merchant_alias"),
-        merchantAvatar = row.text("merchant_avatar"),
+        donationTitle = row.label("donation_title"),
+        merchantAlias = row.label("merchant_alias"),
+        merchantAvatar = row.label("merchant_avatar"),
         original = row,
     )
 
@@ -212,7 +212,7 @@ object EnzonaReadJson {
     private fun JsonObject.loose(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeUnless { it == JsonNull || !it.isString && it.content == "false" }?.content
 
-    /** Descriptive account text: a JSON boolean (the provider's "not applicable" marker) or blank is absent. */
+    /** Descriptive text (account, history): a JSON boolean (the provider's "not applicable", as `"client_id": false`) or blank is absent. */
     private fun JsonObject.label(key: String): String? = primitive(key)
         ?.takeIf { it.isString || it.content.toBooleanStrictOrNull() == null }?.content?.takeIf(String::isNotBlank)
 

@@ -6,7 +6,7 @@ import java.time.Instant
 /**
  * State of a movement. Sending: the single request is out. Unconfirmed: ENZONA did not prove the result in time
  * ("Sin confirmar"); it is checked against the history and never resent. NotSent: the request never reached ENZONA.
- * NotDone: unconfirmed, and the person marked it as not done once the history did not have it.
+ * NotDone: unconfirmed, and the ENZONA history did not have it 15 minutes later (or, before, the person marked it).
  * Other: a state ENZONA reports that the app does not interpret; its own words are shown.
  */
 enum class OperationStatus { Sending, Confirmed, Pending, Rejected, Unconfirmed, NotSent, NotDone, Other }
@@ -60,6 +60,4 @@ data class OperationUi(
     val dateText: String? = null,
     /** Bank channel of a card movement ("ATM", "POS", "ENZONA"). */
     val channel: String? = null,
-    /** Unconfirmed and missing from a history read made a day after it: the person may mark it as not done. */
-    val canMarkNotDone: Boolean = false,
 )

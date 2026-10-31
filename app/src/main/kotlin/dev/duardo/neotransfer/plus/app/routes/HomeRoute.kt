@@ -48,8 +48,8 @@ fun HomeRoute(plus: PlusApp) {
 
     val cardUis = cards.map { it.card }
     val history = transactions
-    val activity = remember(history, cardUis, account) {
-        history?.let { accountActivity(it, emptyList(), account?.username, cardUis, emptyList(), plus.zone) }
+    val activity = remember(history, journal, cardUis, account, contacts) {
+        history?.let { accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone, withPending = false) }
     }
     val recent = when {
         wallet == null || history == null -> null

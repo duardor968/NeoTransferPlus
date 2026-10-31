@@ -415,16 +415,6 @@ class EnzonaRepository internal constructor(
         return preparePayment(intent.draft())
     }
 
-    /**
-     * The person says [intentId], unconfirmed, did not happen: allowed once a history read made at least a day after it
-     * covered its time and had no row for it. It stays UNKNOWN underneath, and a row that appears later undoes the mark.
-     */
-    suspend fun markNotDone(intentId: String): Boolean {
-        val owner = session.state.value.ownerSubject ?: return false
-        return try { store.markNotDone(owner, intentId, now()) } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { failed("payment.not_done", failure); false }
-    }
-
     private suspend fun recheck(intent: EnzonaIntent) {
         refreshBalance(intent.cardUuid)
         syncMutex.withLock {

@@ -50,6 +50,7 @@ import java.text.Normalizer
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
+import kotlin.math.abs
 
 /** Card issuers by what ENZONA says of them, or by the card number ([CardNumbers.issuer]) for cards of other people. */
 object Banks {
@@ -198,6 +199,7 @@ private fun serviceKindOf(text: String): OperationKind {
         "hogar" in key -> OperationKind.NautaHome
         "nauta" in key -> OperationKind.Nauta
         "fijo" in key || "telef" in key -> OperationKind.Landline
+        "transfer" in key -> OperationKind.CardTransfer
         else -> OperationKind.Service
     }
 }
@@ -262,16 +264,16 @@ private const val CheckFirst = "Revisa la actividad antes de repetirla."
 const val UnconfirmedReason = "ENZONA no confirmó la operación. $CheckFirst"
 const val NoReplyReason = "Sin respuesta de ENZONA. $CheckFirst"
 const val NotDeliveredReason = "No llegó a ENZONA. No se movió dinero."
-const val NotInHistoryReason = "No aparece en tu historial de ENZONA. Si el saldo no bajó, no se movió dinero."
-const val MarkedNotDoneReason = "La marcaste como no realizada. Si aparece en tu historial de ENZONA, se actualizará."
+const val NotInHistoryReason = "ENZONA no la registró. No se movió dinero."
+const val MarkedNotDoneReason = "La marcaste como no realizada."
 const val ByAmountReason = "Confirmada en tu historial de ENZONA por importe y hora."
 
 /** ENZONA's own words, quoted: «ENZONA respondió: “Saldo insuficiente”.» */
 private fun answered(text: String) = "ENZONA respondió: “${text.removeSuffix(".")}”."
 
-/** Unconfirmed and missing from a history read made at least a day after it. */
+/** Unconfirmed and missing from a history read made [EnzonaReconciliation.NOT_DONE_AFTER] after it: it was not done. */
 private val EnzonaJournalEntry.missing: Boolean
-    get() = state == EnzonaIntentState.UNKNOWN && notFoundAt?.let { it >= intent.preparedAt + EnzonaReconciliation.AFTER } == true
+    get() = state == EnzonaIntentState.UNKNOWN && notFoundAt?.let { it >= intent.preparedAt + EnzonaReconciliation.NOT_DONE_AFTER } == true
 
 /** Why this attempt is where it is; [notice] is what this process saw of it. Null for a plain confirmation. */
 private fun EnzonaJournalEntry.reason(notice: EnzonaPaymentNotice?): String? = when (state) {
@@ -337,7 +339,7 @@ fun EnzonaJournalEntry.toUi(cards: List<CardUi>, contacts: List<Contact>, notice
     val status = when (state) {
         EnzonaIntentState.PREPARED -> if (notSent != null) OperationStatus.NotSent else OperationStatus.Sending
         EnzonaIntentState.SUBMITTING -> OperationStatus.Sending
-        EnzonaIntentState.UNKNOWN -> if (markedNotDoneAt != null) OperationStatus.NotDone else OperationStatus.Unconfirmed
+        EnzonaIntentState.UNKNOWN -> if (markedNotDoneAt != null || missing) OperationStatus.NotDone else OperationStatus.Unconfirmed
         EnzonaIntentState.CONFIRMED -> OperationStatus.Confirmed
         EnzonaIntentState.REJECTED -> OperationStatus.Rejected
         EnzonaIntentState.NOT_DELIVERED -> OperationStatus.NotSent
@@ -365,7 +367,6 @@ fun EnzonaJournalEntry.toUi(cards: List<CardUi>, contacts: List<Contact>, notice
         reason = if (state == EnzonaIntentState.PREPARED) notSent else reason(notice),
         transactionId = remoteId,
         description = intent.description,
-        canMarkNotDone = missing && markedNotDoneAt == null,
     )
 }
 
@@ -373,16 +374,34 @@ fun EnzonaJournalEntry.toUi(cards: List<CardUi>, contacts: List<Contact>, notice
 private fun EnzonaJournalEntry.pending(known: Set<String>): Boolean = state in setOf(EnzonaIntentState.SUBMITTING,
     EnzonaIntentState.UNKNOWN, EnzonaIntentState.REJECTED, EnzonaIntentState.NOT_DELIVERED) && remoteId !in known
 
-/** The ENZONA account's record: history rows and this phone's payments without a history row, newest first. */
+/**
+ * The ENZONA account's record, newest first: history rows, told by what this phone sent when the row is one of its
+ * payments (the history leaves out who received a transfer), and, [withPending], this phone's payments without a row.
+ */
 fun accountActivity(
     transactions: List<EnzonaTransaction>, journal: List<EnzonaJournalEntry>, ownUsername: String?,
-    cards: List<CardUi>, contacts: List<Contact>, zone: ZoneId,
+    cards: List<CardUi>, contacts: List<Contact>, zone: ZoneId, withPending: Boolean = true,
 ): List<OperationUi> {
     val known = transactions.map { it.transactionUuid }.toSet()
-    val rows = transactions.distinctBy { it.transactionUuid }.map { it.toUi(ownUsername, cards, zone) } +
-        journal.filter { it.pending(known) }.map { it.toUi(cards, contacts) }
+    val sent = journal.filter { it.remoteId != null }.associateBy { it.remoteId }
+    // Confirmed from ENZONA's reply, not by a history uuid: tied to the one row of the same amount near its time.
+    val unlinked = journal.filter { it.state == EnzonaIntentState.CONFIRMED && it.remoteId !in known }
+    val rows = transactions.distinctBy { it.transactionUuid }.map { transaction ->
+        val row = transaction.toUi(ownUsername, cards, zone)
+        val mine = sent[transaction.transactionUuid] ?: unlinked.filter { entry ->
+            row.kind != OperationKind.Incoming && row.amount?.amount?.compareTo(entry.intent.amount.toBigDecimalOrNull()) == 0 &&
+                row.at?.let { abs(it.toEpochMilli() - entry.intent.preparedAt) <= SameRowWindowMillis } == true
+        }.singleOrNull()
+        mine?.toUi(cards, contacts)?.let { mine ->
+            row.copy(kind = mine.kind, title = mine.title, counterpart = mine.counterpart, contactId = mine.contactId,
+                card = row.card ?: mine.card, description = row.description ?: mine.description)
+        } ?: row
+    } + if (withPending) journal.filter { it.pending(known) }.map { it.toUi(cards, contacts) } else emptyList()
     return rows.sortedWith(compareByDescending<OperationUi, Instant?>(nullsFirst()) { it.at })
 }
+
+/** How far from the time it was sent a history row can be and still be that payment. */
+private const val SameRowWindowMillis = 10 * 60_000L
 
 /** How long a payment that never reached ENZONA waits on Home to be sent again. */
 const val RetryWindowMillis = 12 * 60 * 60_000L
@@ -401,7 +420,7 @@ fun inProgress(journal: List<EnzonaJournalEntry>, known: Set<String>, cards: Lis
     return journal.filter {
         val waiting = when (it.state) {
             EnzonaIntentState.SUBMITTING -> true
-            EnzonaIntentState.UNKNOWN -> it.markedNotDoneAt == null
+            EnzonaIntentState.UNKNOWN -> it.markedNotDoneAt == null && !it.missing
             EnzonaIntentState.NOT_DELIVERED -> latest[it.intent.values] == it.intent.preparedAt && now - it.intent.preparedAt < RetryWindowMillis
             else -> false
         }

@@ -183,14 +183,6 @@ class EnzonaRepositoryTest {
             } ?: return@forEach
             journal.update { it + (change.id to next) }
         }
-        override suspend fun markNotDone(owner: String, id: String, at: Long): Boolean {
-            val current = journal.value[id]?.takeIf {
-                it.intent.ownerSubject == owner && it.state == EnzonaIntentState.UNKNOWN && it.markedNotDoneAt == null &&
-                    (it.notFoundAt ?: return false) >= it.intent.preparedAt + EnzonaReconciliation.AFTER
-            } ?: return false
-            journal.update { it + (id to current.copy(markedNotDoneAt = at)) }
-            return true
-        }
         override suspend fun recordResult(owner: String, id: String, state: EnzonaIntentState, remoteId: String?): Boolean {
             val current = journal.value[id]?.takeIf { it.intent.ownerSubject == owner } ?: return false
             if (current.state == EnzonaIntentState.PREPARED || (current.state.isTerminal && current.state != state)) return false
@@ -503,26 +495,19 @@ class EnzonaRepositoryTest {
         }
     }
 
-    @Test fun aDayLaterWithNoRowThePersonMayMarkItNotDoneUntilTheRowAppears() = runBlocking {
+    @Test fun aRowMissingAQuarterHourLaterIsNotDoneUntilTheRowAppears() = runBlocking {
         Harness().use { h ->
             h.readAt = PAID_AT + 60_000
             val id = h.unconfirmedTransfer(EnzonaHttpReply(504, ""))
             assertEquals(PAID_AT + 60_000, h.entry(id).notFoundAt)
-            assertFalse(h.repository.markNotDone(id)) // too soon to say
-            h.readAt = PAID_AT + DAY + 3_600_000
+            h.readAt = PAID_AT + EnzonaReconciliation.NOT_DONE_AFTER + 60_000
             assertNull(h.repository.refresh())
             assertEquals(h.readAt, h.entry(id).notFoundAt)
-            h.clock = h.readAt + 1
-            assertTrue(h.repository.markNotDone(id))
             assertEquals(EnzonaIntentState.UNKNOWN, h.entry(id).state)
-            assertEquals(h.clock, h.entry(id).markedNotDoneAt)
-            // The row shows up, still pending: the mark is undone. Accepted later: confirmed by amount and time.
-            h.enzona.history = "[${sent("late-row", 1121, PAID_AT + 600_000)}]"
-            assertNull(h.repository.refresh())
-            assertNull(h.entry(id).markedNotDoneAt)
-            assertNull(h.entry(id).notFoundAt)
+            // The row shows up after all: the miss is undone, and accepted it confirms by amount and time.
             h.enzona.history = "[${sent("late-row", 1111, PAID_AT + 600_000)}]"
             assertNull(h.repository.refresh())
+            assertNull(h.entry(id).notFoundAt)
             assertEquals(EnzonaIntentState.CONFIRMED, h.entry(id).state)
         }
     }

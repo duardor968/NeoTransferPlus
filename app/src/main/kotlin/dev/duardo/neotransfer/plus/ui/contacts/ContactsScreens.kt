@@ -293,7 +293,6 @@ fun ContactDetailScreen(
                     contact.cards.forEach { card ->
                         NeoRow(
                             formatCardNumber(card.number),
-                            fitTitle = true,
                             supporting = listOfNotNull(card.issuer, card.label).joinToString(" · ").ifEmpty { null },
                             leading = { ForeignCardThumb(card) },
                             trailing = { CardMenu({ actions.copy(card.number) }, { actions.editCard(card.id) }, { actions.removeCard(card.id) }) },

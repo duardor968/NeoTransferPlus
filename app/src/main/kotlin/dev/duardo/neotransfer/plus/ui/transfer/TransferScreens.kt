@@ -131,7 +131,6 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                     Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(0, count)) {
                         NeoRow(
                             formatCardNumber(typed.number),
-                            fitTitle = true,
                             supporting = listOfNotNull("Tarjeta nueva", typed.issuer).joinToString(" · "),
                             leading = { ForeignCardThumb(typed) },
                             onClick = actions::pickTyped,
@@ -185,7 +184,6 @@ private fun ContactCardsSheet(contact: ContactUi, actions: RecipientActions) {
             contact.cards.forEach { card ->
                 NeoRow(
                     formatCardNumber(card.number),
-                    fitTitle = true,
                     supporting = listOfNotNull(card.issuer, card.label).joinToString(" · ").ifEmpty { null },
                     leading = { ForeignCardThumb(card) },
                     onClick = { actions.pickContactCard(contact.id, card.id) },
