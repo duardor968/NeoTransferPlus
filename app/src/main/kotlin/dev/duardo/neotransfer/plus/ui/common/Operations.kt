@@ -1,10 +1,19 @@
 package dev.duardo.neotransfer.plus.ui.common
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.AvatarBadge
 import dev.duardo.neotransfer.plus.designsystem.component.IconAvatar
@@ -17,7 +26,9 @@ import dev.duardo.neotransfer.plus.designsystem.component.StatusChip
 import dev.duardo.neotransfer.plus.designsystem.component.StatusTone
 import dev.duardo.neotransfer.plus.designsystem.component.content
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
+import dev.duardo.neotransfer.plus.designsystem.theme.NeoAccents
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
+import dev.duardo.neotransfer.plus.ui.model.OperationOrigin
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
 import dev.duardo.neotransfer.plus.ui.model.OperationUi
 import dev.duardo.neotransfer.plus.ui.model.ServiceKind
@@ -75,6 +86,10 @@ val OperationKind.label: String
         OperationKind.NautaHome -> "Nauta Hogar"
         OperationKind.Service -> "Pago de servicio"
         OperationKind.CardMovement -> "Movimiento de tarjeta"
+        OperationKind.Water -> "Agua"
+        OperationKind.MobileTopUp -> "Recarga móvil"
+        OperationKind.CubacelTransfer -> "Saldo Cubacel transferido"
+        OperationKind.Other -> "Operación"
     }
 
 @get:DrawableRes
@@ -89,6 +104,10 @@ val OperationKind.icon: Int
         OperationKind.NautaHome -> Ds.drawable.ic_router
         OperationKind.Service -> Ds.drawable.ic_receipt_long
         OperationKind.CardMovement -> Ds.drawable.ic_credit_card
+        OperationKind.Water -> Ds.drawable.ic_water_drop
+        OperationKind.MobileTopUp -> Ds.drawable.ic_smartphone
+        OperationKind.CubacelTransfer -> Ds.drawable.ic_swap_horiz
+        OperationKind.Other -> Ds.drawable.ic_receipt_long
     }
 
 @get:DrawableRes
@@ -103,20 +122,47 @@ val ServiceKind.icon: Int
 private val OperationKind.person: Boolean
     get() = this == OperationKind.CardTransfer || this == OperationKind.AccountTransfer || this == OperationKind.Incoming
 
-/** People get initials with a direction badge; services, merchants and card lines get their glyph. */
+/**
+ * The title names a person. A card's bank record names no one, even for a credit, unless NeoTransfer told who it was.
+ */
+val OperationUi.namesPerson: Boolean
+    get() = kind.person && (channel == null || origin == OperationOrigin.NeoTransfer) && title.firstOrNull()?.isLetter() == true
+
+/**
+ * People get initials with a direction badge; services, merchants and card lines get their glyph. The [origin] dot
+ * sits at the bottom left, clear of the direction badge.
+ */
 @Composable
 fun OperationAvatar(operation: OperationUi) {
-    // A card's bank record names no person, even for a credit.
-    if (operation.kind.person && operation.channel == null && operation.title.firstOrNull()?.isLetter() == true) {
-        val badge = if (operation.kind.incoming) {
-            AvatarBadge(Ds.drawable.ic_south_west, Neo.colors.accent, Neo.colors.onAccent)
+    val person = operation.namesPerson
+    Box {
+        if (person) {
+            val badge = if (operation.kind.incoming) {
+                AvatarBadge(Ds.drawable.ic_south_west, Neo.colors.accent, Neo.colors.onAccent)
+            } else {
+                AvatarBadge(Ds.drawable.ic_arrow_outward, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
+            }
+            NameAvatar(operation.title, badge = badge)
         } else {
-            AvatarBadge(Ds.drawable.ic_arrow_outward, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
+            IconAvatar(operation.kind.icon)
         }
-        NameAvatar(operation.title, badge = badge)
-    } else {
-        IconAvatar(operation.kind.icon)
+        operation.origin?.let { origin ->
+            OriginDot(origin, Modifier.align(Alignment.BottomStart).offset((-2).dp, 2.dp))
+        }
     }
+}
+
+/** The app's brand colour: royal blue for this app, NeoTransfer's mint for NeoTransfer. */
+@Composable
+private fun OriginDot(origin: OperationOrigin, modifier: Modifier) {
+    val accent = if (origin == OperationOrigin.Enzona) NeoAccents.RoyalBlue else NeoAccents.Mint
+    Box(
+        modifier
+            .size(16.dp)
+            .border(2.dp, Neo.colors.group, CircleShape)
+            .padding(2.dp)
+            .background(if (Neo.colors.isDark) accent.onDark else accent.onLight, CircleShape),
+    )
 }
 
 /** Amount as listed: incoming in positive ink with a plus; money that never moved, struck through. */

@@ -2,6 +2,13 @@ package dev.duardo.neotransfer.plus.preview
 
 import dev.duardo.neotransfer.plus.app.NoReplyReason
 import dev.duardo.neotransfer.plus.app.NotDeliveredReason
+import dev.duardo.neotransfer.plus.app.peerRows
+import dev.duardo.neotransfer.plus.app.withPeer
+import dev.duardo.neotransfer.plus.app.withPeerLines
+import dev.duardo.neotransfer.plus.core.activity.SyncDirection
+import dev.duardo.neotransfer.plus.core.activity.SyncKind
+import dev.duardo.neotransfer.plus.core.activity.SyncOperation
+import dev.duardo.neotransfer.plus.core.activity.SyncStatus
 import dev.duardo.neotransfer.plus.ui.model.AccountCardUi
 import dev.duardo.neotransfer.plus.ui.model.AccountUi
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
@@ -82,7 +89,7 @@ object PreviewData {
     val daniela = ContactUi("phone:daniela", "Daniela Ortiz", listOf(card("do-1", "9204120777003196", "BPA")), listOf("58337102"), fromAddressBook = true)
     /** In the address book, no card saved yet. */
     val rafael = ContactUi("phone:rafael", "Rafael Torres", emptyList(), listOf("63660981"), fromAddressBook = true)
-    private val carlos = ContactUi("phone:carlos", "Carlos Medina", emptyList(), listOf("55208817"), fromAddressBook = true)
+    val carlos = ContactUi("phone:carlos", "Carlos Medina", emptyList(), listOf("55208817"), fromAddressBook = true)
     private val elena = ContactUi("phone:elena", "Elena Vázquez", emptyList(), listOf("54019362"), fromAddressBook = true)
     private val oscar = ContactUi("phone:oscar", "Óscar Núñez", emptyList(), listOf("62750413"), fromAddressBook = true)
 
@@ -174,6 +181,36 @@ object PreviewData {
         movement("m4", "Compra en comercio", "POS", "820.60", at(2, 16, 22)),
         movement("m5", "Pago de electricidad", "ENZONA", "387.10", at(3, 11, 30)),
     )
+
+    // NeoTransfer's activity -----------------------------------------------------------------------------------
+    private fun peer(id: String, kind: SyncKind, status: SyncStatus, title: String, at: Instant, amount: String, card: String, counterpart: String,
+        contactId: String = "", direction: SyncDirection = SyncDirection.OUT) =
+        SyncOperation(id, kind, status, title, at.toEpochMilli(), BigDecimal(amount), "CUP", direction, card, counterpart, contactId)
+
+    /** What NeoTransfer did by USSD: the transfer to María is also a line of BPA's statement. */
+    private val peerOperations = listOf(
+        peer("u-maria", SyncKind.CARD_TRANSFER, SyncStatus.CONFIRMED, "María Fernanda Ruiz", ago(22), "640.00", bpa.number!!, "9204067704229016", maria.id),
+        peer("u-yunior", SyncKind.CARD_TRANSFER, SyncStatus.UNCONFIRMED, "Yunior Castillo", ago(90), "3000.00", "4325", "9225061122334453", yunior.id),
+        peer("u-carlos", SyncKind.INCOMING, SyncStatus.CONFIRMED, "Carlos Medina", ago(200), "900.00", bpa.number!!, "9204120777003196", carlos.id,
+            SyncDirection.IN),
+        peer("u-topup", SyncKind.MOBILE_TOPUP, SyncStatus.CONFIRMED, "Rafael Torres", ago(70), "500.00", "4325", "63660981", rafael.id),
+        peer("u-water", SyncKind.WATER, SyncStatus.CONFIRMED, "Agua", at(2, 9, 30), "120.00", bpa.number!!, "1234567"),
+    )
+
+    /** BPA's statement with the line of NeoTransfer's transfer to María. */
+    val peerStatement = listOf(movement("m:c-bpa:0", "Débito por transferencia", "Transfermóvil", "640.00", ago(20))) +
+        cardMovements.mapIndexed { index, line -> line.copy(id = "m:c-bpa:${index + 1}") }
+
+    private val peerUi = peerRows(peerOperations, peerStatement, listOf(bpa, bandec, banmet))
+
+    /** The account's record with NeoTransfer installed: blue dots for this app's, green for NeoTransfer's. */
+    val historyWithPeer = withPeer(history, peerUi)
+    /** The same record without NeoTransfer: no dots, no rows of its. */
+    val historyWithoutPeer = withPeer(history, peerRows(null, peerStatement, listOf(bpa, bandec, banmet)))
+    val recentWithPeer = withPeer(recent, peerUi).take(6)
+    val peerStatementMerged = peerStatement.withPeerLines(peerUi)
+    val mergedToMaria = peerUi!!.first { it.id == "m:c-bpa:0" }
+    val peerToYunior = peerUi!!.first { it.id == "p:u-yunior" }
 
     const val ownQrPayload = "05b6f71e9d2c4a83"
 

@@ -18,7 +18,10 @@ import dev.duardo.neotransfer.plus.app.Dest
 import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.accountActivity
 import dev.duardo.neotransfer.plus.app.movements
+import dev.duardo.neotransfer.plus.app.peerRows
 import dev.duardo.neotransfer.plus.app.toUi
+import dev.duardo.neotransfer.plus.app.withPeer
+import dev.duardo.neotransfer.plus.app.withPeerLines
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaHistoryMatch
 import dev.duardo.neotransfer.plus.designsystem.format.formatAmount
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
@@ -37,6 +40,7 @@ import dev.duardo.neotransfer.plus.ui.model.ActivityContent
 import dev.duardo.neotransfer.plus.ui.model.ActivityFilter
 import dev.duardo.neotransfer.plus.ui.model.ActivitySource
 import dev.duardo.neotransfer.plus.ui.model.ActivityUi
+import dev.duardo.neotransfer.plus.ui.model.CardUi
 import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
 import dev.duardo.neotransfer.plus.ui.model.OperationUi
 import dev.duardo.neotransfer.plus.ui.model.RefreshState
@@ -58,12 +62,13 @@ fun ActivityRoute(plus: PlusApp) {
     val loadingOlder by plus.loadingOlder.collectAsState()
     val cardUis = cards.map { it.card }
     val selectedCard = query.card?.takeIf { id -> cardUis.any { it.id == id } } ?: cardUis.firstOrNull()?.id
+    val peer = rememberPeerRows(plus, cardUis)
 
-    val all = remember(transactions, journal, account, cardUis, contacts) {
-        transactions?.let { accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone) }
+    val all = remember(transactions, journal, account, cardUis, contacts, peer) {
+        transactions?.let { withPeer(accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone), peer) }
     }
-    val movements = remember(wallet, selectedCard) {
-        wallet?.firstOrNull { it.card.fundingSourceUuid == selectedCard }?.movements(plus.zone)
+    val movements = remember(wallet, selectedCard, peer) {
+        wallet?.firstOrNull { it.card.fundingSourceUuid == selectedCard }?.movements(plus.zone)?.withPeerLines(peer)
     }
     val content = when (query.source) {
         ActivitySource.Account -> when {
@@ -122,10 +127,22 @@ private fun OperationUi.matches(query: String, filter: ActivityFilter): Boolean 
     return needle in words || (digits.isNotEmpty() && (digits in counterpartText || amountText.startsWith(needle.filter { it.isDigit() || it == '.' })))
 }
 
+/**
+ * NeoTransfer's rows, with the card statement lines they are merged into ([peerRows]); null while NeoTransfer is not
+ * there.
+ */
+@Composable
+fun rememberPeerRows(plus: PlusApp, cards: List<CardUi>): List<OperationUi>? {
+    val peer by plus.peerActivity.collectAsState()
+    val wallet by plus.wallet.collectAsState()
+    return remember(peer, wallet, cards) { peerRows(peer, wallet.orEmpty().flatMap { it.movements(plus.zone) }, cards) }
+}
+
 /** One movement by its key, from whichever record holds it; null until loaded or once it is gone. */
 @Composable
 fun rememberOperation(plus: PlusApp, key: String): OperationUi? {
     val cards = rememberWallet(plus).map { it.card }
+    val peer = rememberPeerRows(plus, cards)
     val wallet by plus.wallet.collectAsState()
     val transactions by plus.transactions.collectAsState()
     val journal by plus.journal.collectAsState()
@@ -134,7 +151,7 @@ fun rememberOperation(plus: PlusApp, key: String): OperationUi? {
     val notices by plus.notices.collectAsState()
     val notSent by plus.notSent.collectAsState()
     val titles by plus.titles.collectAsState()
-    return remember(key, cards, wallet, transactions, journal, account, contacts, notices, notSent, titles) {
+    return remember(key, cards, wallet, transactions, journal, account, contacts, notices, notSent, titles, peer) {
         val (kind, rest) = key.substringBefore(':') to key.substringAfter(':')
         when (kind) {
             "tx" -> transactions?.firstOrNull { it.transactionUuid == rest }?.toUi(account?.username, cards, plus.zone)
@@ -144,7 +161,8 @@ fun rememberOperation(plus: PlusApp, key: String): OperationUi? {
                     ?.let { row -> if (entry.matchedBy == EnzonaHistoryMatch.AMOUNT_AND_TIME) row.copy(reason = ByAmountReason) else row }
                     ?: entry.toUi(cards, contacts.orEmpty(), notices[rest], titles[rest], notSent[rest])
             }
-            "m" -> {
+            "p" -> peer?.firstOrNull { it.id == key }
+            "m" -> peer?.firstOrNull { it.id == key } ?: run {
                 val card = rest.substringBeforeLast(':')
                 val index = rest.substringAfterLast(':').toIntOrNull()
                 wallet?.firstOrNull { it.card.fundingSourceUuid == card }?.movements(plus.zone)?.getOrNull(index ?: -1)
@@ -166,6 +184,8 @@ fun OperationRoute(plus: PlusApp, key: String) {
     val loaded = when (key.substringBefore(':')) {
         "tx" -> transactions != null
         "j" -> journal != null
+        // NeoTransfer's rows are there from its last read, or gone with it.
+        "p" -> true
         else -> wallet != null
     }
     // Once its record is loaded, a movement that is not there anymore (signed out, cleared) closes its receipt.

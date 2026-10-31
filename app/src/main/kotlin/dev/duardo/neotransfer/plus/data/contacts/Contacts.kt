@@ -100,7 +100,7 @@ internal abstract class ContactsDatabase : RoomDatabase() {
         const val NAME = "contacts.db"
         @Volatile private var shared: ContactsDatabase? = null
 
-        /** The process's one instance, shared by the app and [ContactsProvider] (which may be asked first). */
+        /** The process's one instance, shared by the app and [dev.duardo.neotransfer.plus.platform.SyncProvider] (which may be asked first). */
         fun get(context: Context): ContactsDatabase =
             shared ?: synchronized(this) { shared ?: open(context.applicationContext).also { shared = it } }
 

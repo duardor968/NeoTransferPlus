@@ -38,11 +38,13 @@ import dev.duardo.neotransfer.plus.ui.common.TimeLabels
 import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.common.label
 import dev.duardo.neotransfer.plus.ui.common.moneyMoved
+import dev.duardo.neotransfer.plus.ui.common.namesPerson
 import dev.duardo.neotransfer.plus.ui.common.numberLine
 import dev.duardo.neotransfer.plus.ui.common.timeLabels
 import dev.duardo.neotransfer.plus.ui.common.tone
 import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
+import dev.duardo.neotransfer.plus.ui.model.OperationOrigin
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
 import dev.duardo.neotransfer.plus.ui.model.OperationUi
 import dev.duardo.neotransfer.plus.ui.model.issuerOf
@@ -59,7 +61,7 @@ interface OperationActions {
 /**
  * Receipt of one movement. The textured check appears only once ENZONA confirmed it and stands for the state;
  * otherwise the state chip and, when it needs attention, what happened in plain words. A receipt is shared only for
- * money that moved or may have.
+ * money that moved or may have, and never for one known only from NeoTransfer ([OperationUi.readOnly]).
  */
 @Composable
 fun OperationDetailScreen(
@@ -86,12 +88,13 @@ fun OperationDetailScreen(
                 Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.gutter, vertical = NeoSpace.l),
                 verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
             ) {
-                when (operation.status) {
-                    OperationStatus.Unconfirmed -> {
+                when {
+                    operation.readOnly -> Unit
+                    operation.status == OperationStatus.Unconfirmed -> {
                         NeoButton("Actualizar actividad", actions::refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh, loading = refreshing)
                         NeoTextButton("Cambiar PIN de pago", actions::changePassword, Modifier.fillMaxWidth())
                     }
-                    OperationStatus.Sending, OperationStatus.NotSent, OperationStatus.Rejected, OperationStatus.NotDone -> Unit
+                    operation.status in setOf(OperationStatus.Sending, OperationStatus.NotSent, OperationStatus.Rejected, OperationStatus.NotDone) -> Unit
                     else -> NeoButton("Compartir comprobante", actions::share, icon = Ds.drawable.ic_share)
                 }
             }
@@ -106,10 +109,11 @@ private fun TicketHeader(operation: OperationUi) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
     ) {
-        val person = operation.kind in setOf(OperationKind.CardTransfer, OperationKind.AccountTransfer, OperationKind.Incoming)
+        // ENZONA's check is not NeoTransfer's to show: its operations name their state with the chip.
+        val enzona = operation.origin != OperationOrigin.NeoTransfer
         when {
-            operation.status == OperationStatus.Confirmed && operation.kind != OperationKind.CardMovement -> ConfirmedMark(80.dp)
-            person && operation.channel == null && operation.title.firstOrNull()?.isLetter() == true -> NameAvatar(operation.title, size = 64.dp)
+            enzona && operation.status == OperationStatus.Confirmed && operation.kind != OperationKind.CardMovement -> ConfirmedMark(80.dp)
+            operation.namesPerson -> NameAvatar(operation.title, size = 64.dp)
             else -> IconAvatar(operation.kind.icon, size = 64.dp)
         }
         Text(operation.title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
@@ -122,7 +126,7 @@ private fun TicketHeader(operation: OperationUi) {
             )
         }
         // The textured check already says it was confirmed; every other state names itself.
-        if (operation.kind != OperationKind.CardMovement && operation.status != OperationStatus.Confirmed) OperationStatusChip(operation)
+        if (operation.kind != OperationKind.CardMovement && (operation.status != OperationStatus.Confirmed || !enzona)) OperationStatusChip(operation)
         operation.reason?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, color = operation.status.tone.content(), textAlign = TextAlign.Center)
         }
@@ -142,7 +146,8 @@ fun detailLines(operation: OperationUi, labels: TimeLabels): List<SummaryLine> {
         counterpart,
         operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it.numberLine, issuerOf(it.bank, it.currency)) },
         operation.description?.takeIf { it != operation.title }?.let { SummaryLine("Concepto", it) },
-        operation.channel?.let { SummaryLine("Canal", it) },
+        operation.channel?.takeIf { operation.origin != OperationOrigin.NeoTransfer }?.let { SummaryLine("Canal", it) },
+        SummaryLine("Hecha con", "NeoTransfer").takeIf { operation.origin == OperationOrigin.NeoTransfer },
         SummaryLine("Fecha", operation.at?.let(labels::stamp) ?: operation.dateText ?: "Sin fecha"),
         operation.transactionId?.let { SummaryLine("Transacción", it) },
     )
@@ -150,8 +155,8 @@ fun detailLines(operation: OperationUi, labels: TimeLabels): List<SummaryLine> {
 
 private fun referenceLabel(kind: OperationKind): String = when (kind) {
     OperationKind.QrPayment -> "Comercio"
-    OperationKind.Electricity -> "Código de cliente"
-    OperationKind.Landline -> "Teléfono"
+    OperationKind.Electricity, OperationKind.Water -> "Código de cliente"
+    OperationKind.Landline, OperationKind.MobileTopUp, OperationKind.CubacelTransfer -> "Teléfono"
     OperationKind.Nauta, OperationKind.NautaHome -> "Cuenta"
     else -> "Referencia"
 }

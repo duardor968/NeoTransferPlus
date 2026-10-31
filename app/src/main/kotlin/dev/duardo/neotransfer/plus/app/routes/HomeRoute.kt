@@ -15,6 +15,7 @@ import dev.duardo.neotransfer.plus.app.PlusApp
 import dev.duardo.neotransfer.plus.app.accountActivity
 import dev.duardo.neotransfer.plus.app.inProgress
 import dev.duardo.neotransfer.plus.app.toUi
+import dev.duardo.neotransfer.plus.app.withPeer
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.data.EnzonaFailure
 import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
@@ -48,8 +49,9 @@ fun HomeRoute(plus: PlusApp) {
 
     val cardUis = cards.map { it.card }
     val history = transactions
-    val activity = remember(history, journal, cardUis, account, contacts) {
-        history?.let { accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone, withPending = false) }
+    val peer = rememberPeerRows(plus, cardUis)
+    val activity = remember(history, journal, cardUis, account, contacts, peer) {
+        history?.let { withPeer(accountActivity(it, journal.orEmpty(), account?.username, cardUis, contacts.orEmpty(), plus.zone, withPending = false), peer) }
     }
     val recent = when {
         wallet == null || history == null -> null

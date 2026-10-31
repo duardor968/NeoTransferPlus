@@ -23,6 +23,19 @@ enum class OperationKind(val incoming: Boolean = false) {
     Service,
     /** A line of the bank's own record of a card: ATM, POS, Transfermóvil, ENZONA. */
     CardMovement,
+    // Only done with NeoTransfer, shown next to this app's own.
+    Water,
+    MobileTopUp,
+    CubacelTransfer,
+    Other,
+}
+
+/** Which app did an operation: the dot on its avatar, shown only while both apps are installed. */
+enum class OperationOrigin {
+    /** This app, through ENZONA. */
+    Enzona,
+    /** NeoTransfer, by USSD. */
+    NeoTransfer,
 }
 
 /** The other side, as ENZONA identifies it. */
@@ -60,4 +73,7 @@ data class OperationUi(
     val dateText: String? = null,
     /** Bank channel of a card movement ("ATM", "POS", "ENZONA"). */
     val channel: String? = null,
+    val origin: OperationOrigin? = null,
+    /** Done with NeoTransfer and known only from it: its receipt offers nothing to do. */
+    val readOnly: Boolean = false,
 )

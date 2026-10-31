@@ -10,7 +10,7 @@
     <!-- The system dialog that lets the periodic credit check run with the app closed. Not a Play app. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" tools:ignore="BatteryLife" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
-    <!-- Saved contacts and cards shared with NeoTransfer, both signed with the same key. -->
+    <!-- Saved contacts and cards, and the activity, shared with NeoTransfer, both signed with the same key. -->
     <permission
         android:name="dev.duardo.neotransfer.permission.SYNC_CONTACTS"
         android:protectionLevel="signature" />
@@ -21,7 +21,7 @@
         <intent>
             <action android:name="com.cyin.himgr.applicationmanager.view.activities.AUTO_START_ACTIVITY" />
         </intent>
-        <provider android:authorities="dev.duardo.neotransfer.contacts" />
+        <provider android:authorities="dev.duardo.neotransfer.sync" />
     </queries>
 
     <application
@@ -62,8 +62,8 @@
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/shared_files" />
         </provider>
         <provider
-            android:name=".data.contacts.ContactsProvider"
-            android:authorities="${applicationId}.contacts"
+            android:name=".platform.SyncProvider"
+            android:authorities="${applicationId}.sync"
             android:exported="true"
             android:readPermission="dev.duardo.neotransfer.permission.SYNC_CONTACTS" />
         <!-- Bundled ML Kit sends usage reports to Google through datatransport. Without this service its

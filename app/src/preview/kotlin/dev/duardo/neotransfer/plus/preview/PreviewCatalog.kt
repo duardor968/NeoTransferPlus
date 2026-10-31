@@ -131,6 +131,7 @@ object PreviewCatalog {
 
         // Home ------------------------------------------------------------------------------------------------
         "home" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, PreviewData.inProgress, PreviewData.recent), noop()) } },
+        "home-peer" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, emptyList(), PreviewData.recentWithPeer), noop()) } },
         "home-bandec" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 1, emptyList(), PreviewData.recent), noop()) } },
         "home-banmet" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 2, emptyList(), PreviewData.recent), noop()) } },
         "home-refreshing" to {
@@ -175,6 +176,13 @@ object PreviewCatalog {
                 ActivityScreen(activity(ActivityContent.Items(listOf(PreviewData.confirmedToJuan))).copy(query = "juan", filter = ActivityFilter.Out), noop())
             }
         },
+        "activity-peer" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.historyWithPeer)), noop()) } },
+        "activity-peer-off" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.historyWithoutPeer)), noop()) } },
+        "activity-peer-cards" to {
+            Tabbed(Tab.Activity) {
+                ActivityScreen(activity(ActivityContent.Items(PreviewData.peerStatementMerged)).copy(source = ActivitySource.Cards, card = bpa.id), noop())
+            }
+        },
         "activity-loading" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Loading), noop()) } },
         "activity-empty" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Empty), noop()) } },
         "operation-confirmed" to { OperationDetailScreen(PreviewData.confirmedToJuan, noop()) },
@@ -187,6 +195,8 @@ object PreviewCatalog {
         },
         "operation-rejected" to { OperationDetailScreen(PreviewData.landlineRejected, noop()) },
         "operation-other" to { OperationDetailScreen(PreviewData.nauta, noop()) },
+        "operation-peer" to { OperationDetailScreen(PreviewData.peerToYunior, noop()) },
+        "operation-peer-merged" to { OperationDetailScreen(PreviewData.mergedToMaria, noop()) },
         "operation-card-movement" to { OperationDetailScreen(PreviewData.cardMovements[2], noop()) },
 
         // Contacts --------------------------------------------------------------------------------------------

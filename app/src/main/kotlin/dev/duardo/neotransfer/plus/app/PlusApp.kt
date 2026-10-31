@@ -3,6 +3,7 @@ package dev.duardo.neotransfer.plus.app
 import android.content.Context
 import android.hardware.biometrics.BiometricManager
 import android.os.SystemClock
+import dev.duardo.neotransfer.plus.core.activity.SyncOperation
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentDraft
 import dev.duardo.neotransfer.plus.data.EnzonaDataGraph
@@ -10,7 +11,6 @@ import dev.duardo.neotransfer.plus.data.EnzonaFailure
 import dev.duardo.neotransfer.plus.data.contacts.Contact
 import dev.duardo.neotransfer.plus.data.contacts.ContactsStore
 import dev.duardo.neotransfer.plus.data.contacts.Directory
-import dev.duardo.neotransfer.plus.data.contacts.PeerContacts
 import dev.duardo.neotransfer.plus.data.contacts.PhoneContact
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaLog
@@ -24,6 +24,8 @@ import dev.duardo.neotransfer.plus.data.services.SavedReferences
 import dev.duardo.neotransfer.plus.platform.AndroidPhoneBook
 import dev.duardo.neotransfer.plus.platform.CreditNotifier
 import dev.duardo.neotransfer.plus.platform.PaymentPasswordVault
+import dev.duardo.neotransfer.plus.platform.PeerActivity
+import dev.duardo.neotransfer.plus.platform.PeerContacts
 import dev.duardo.neotransfer.plus.ui.model.ActivityFilter
 import dev.duardo.neotransfer.plus.ui.model.ActivitySource
 import dev.duardo.neotransfer.plus.ui.model.RefreshState
@@ -144,6 +146,30 @@ class PlusApp(context: Context) {
         }
     }
 
+    // NeoTransfer's activity ---------------------------------------------------------------------------------------
+
+    private val mutablePeerActivity = MutableStateFlow<List<SyncOperation>?>(null)
+    /**
+     * What NeoTransfer did, from its last read; null while it is not installed, not signed like this app or cannot be
+     * read: then the activity shows this app's own rows only, without dots.
+     */
+    val peerActivity: StateFlow<List<SyncOperation>?> = mutablePeerActivity.asStateFlow()
+
+    /** Reads NeoTransfer's activity again; called on each return to the app. */
+    private fun readPeerActivity() {
+        scope.launch {
+            val read = try {
+                withContext(Dispatchers.IO) { PeerActivity.read(app) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            mutablePeerActivity.value = read
+            if (read != null) EnzonaLog.info("activity sync: ${read.size} from peer")
+        }
+    }
+
     // Lock -------------------------------------------------------------------------------------------------------
 
     private val mutableLocked = MutableStateFlow(lockAvailable())
@@ -169,6 +195,7 @@ class PlusApp(context: Context) {
     fun onForeground() {
         foreground = true
         readAddressBook()
+        readPeerActivity()
         val since = backgroundSince
         backgroundSince = null
         if (since != null && SystemClock.elapsedRealtime() - since >= LockAfterMillis && lockAvailable()) mutableLocked.value = true
