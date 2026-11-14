@@ -1,4 +1,5 @@
-# Comprobación Android en el Woodpecker de kvm8: pruebas JVM, compilación y lint en cada push a main y cada pull request.
+# Comprobación Android en el Woodpecker de kvm8: pruebas JVM, compilación y lint en cada push a main y cada pull request;
+# en main, además, la publicación de cada versión nueva.
 # Los informes se publican en registry.asrlabs.space/neotransferplus/ci-reports:<pipeline> (oras pull), salvo en pull requests.
 when:
   - event: push
@@ -46,6 +47,28 @@ steps:
       # testPreviewUnitTest ya incluye las pruebas de testDebugUnitTest. Sin capturas: ScreenshotTest es para revisar en local.
       # Las pruebas instrumentadas solo se compilan: lintDebug ya compila la variante debug.
       - bash ./gradlew --no-daemon -Pcaptures=false :core:test :scanner:testDebugUnitTest :app:testPreviewUnitTest :app:assemblePreview :app:compileDebugAndroidTestKotlin :scanner:compileDebugAndroidTestKotlin :app:lintDebug
+
+  # Con el check en verde, publica la versión de app/build.gradle.kts si todavía no tiene release (.woodpecker/release.sh).
+  release:
+    image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
+    when:
+      - event: push
+        branch: main
+      - event: manual
+    environment:
+      APP_NAME: "NeoTransfer+"
+      SIGNING_CERT_SHA256: 057440783be510ab9fbec65903f3876e60e5f04c41ea14d029db4f5451d0aad9
+      # Los informes de ML Kit a Google se quitan del manifiesto (docs/arquitectura.md, «Informes de uso de ML Kit»).
+      MANIFEST_MUST_NOT_CONTAIN: TransportBackendDiscovery
+      SIGNING_KEYSTORE:
+        from_secret: signing_keystore
+      SIGNING_PROPERTIES:
+        from_secret: signing_properties
+      GITHUB_TOKEN:
+        from_secret: github_release_token
+    commands:
+      - export GRADLE_USER_HOME="/ci-cache/gradle/$${CI_REPO_NAME}"
+      - bash .woodpecker/release.sh
 
   reports:
     image: ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb

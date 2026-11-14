@@ -84,12 +84,13 @@ keyPassword=…
 
 Sin ese archivo, `assembleRelease` produce un APK sin firmar. Todas las versiones se firman con la misma clave para que se instalen encima de la anterior; consérvala junto con su copia.
 
-```powershell
-.\gradlew.bat :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:testPreviewUnitTest :app:assembleRelease :app:lintRelease
-Get-FileHash app\build\outputs\apk\release\app-release.apk -Algorithm SHA256
-```
+### Publicar una versión
 
-La suma SHA-256 va en las notas de cada versión. Antes de publicar, comprueba que el manifiesto fusionado (`app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml`) no contiene `TransportBackendDiscovery` ([por qué](arquitectura.md#escáner)).
+1. Sube `versionCode` y `versionName` en `app/build.gradle.kts`.
+2. Escribe las notas en `docs/versiones/v<versión>.md`, con «Novedades» e «Instalación».
+3. Push a `main`. Si el check pasa, el paso `release` del CI (`.woodpecker/release.sh`) compila, firma, comprueba la firma, la versión y que el manifiesto fusionado no contiene `TransportBackendDiscovery` ([por qué](arquitectura.md#escáner)), y publica el release en GitHub con el APK y su SHA-256. Una versión que ya tiene release no se vuelve a publicar.
+
+La clave y sus contraseñas están en los secretos de Woodpecker `signing_keystore` (el almacén en base64) y `signing_properties` (las líneas de `signing.properties` sin `storeFile`); `github_release_token` solo puede escribir en este repositorio y en NeoTransfer. Un pipeline manual ensaya la publicación: deja el borrador `v<versión>-ensayo` sin publicarlo.
 
 ## Fondos de tarjeta
 
