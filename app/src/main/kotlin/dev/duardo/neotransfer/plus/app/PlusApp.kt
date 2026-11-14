@@ -1,7 +1,6 @@
 package dev.duardo.neotransfer.plus.app
 
 import android.content.Context
-import android.hardware.biometrics.BiometricManager
 import android.os.SystemClock
 import dev.duardo.neotransfer.plus.core.activity.SyncOperation
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
@@ -21,6 +20,9 @@ import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentPreparationException
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaPaymentUpdate
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionState
 import dev.duardo.neotransfer.plus.data.services.SavedReferences
+import dev.duardo.neotransfer.plus.platform.AccessCode
+import dev.duardo.neotransfer.plus.platform.AndroidDeviceLock
+import dev.duardo.neotransfer.plus.platform.AndroidKeys
 import dev.duardo.neotransfer.plus.platform.AndroidPhoneBook
 import dev.duardo.neotransfer.plus.platform.CreditNotifier
 import dev.duardo.neotransfer.plus.platform.PaymentPasswordVault
@@ -71,7 +73,13 @@ class PlusApp(context: Context) {
     val zone: ZoneId = ZoneId.systemDefault()
     val repository = EnzonaDataGraph.get(app).repository
     val contacts = ContactsStore.open(app)
-    val vault = PaymentPasswordVault(app)
+    private val keys = AndroidKeys(app)
+    val deviceLock = AndroidDeviceLock(app)
+    val vault = PaymentPasswordVault(app, keys, deviceLock)
+    /** «Código de acceso»: opens the app instead of the phone's lock, and the payment PIN when it also protects it. */
+    val code = AccessCode(
+        app, keys, deviceLock, savedPinLock = { vault.lock.value }, erasePin = { vault.saved.value.also { saved -> if (saved) vault.clear() } },
+    )
     val notifier = CreditNotifier(app)
     val preferences = Preferences(app)
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -182,10 +190,8 @@ class PlusApp(context: Context) {
         private set
     private var backgroundSince: Long? = null
 
-    /** No screen lock on the phone: nothing to unlock with, so the app opens directly. */
-    fun lockAvailable(): Boolean = app.getSystemService(BiometricManager::class.java)
-        .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL) ==
-        BiometricManager.BIOMETRIC_SUCCESS
+    /** The access code, or else the phone's own lock; without either there is nothing to unlock with, so the app opens directly. */
+    fun lockAvailable(): Boolean = code.active.value || deviceLock.fingerprint() || deviceLock.screenLock()
 
     fun unlock() {
         mutableLocked.value = false

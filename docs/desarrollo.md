@@ -25,7 +25,7 @@ En Linux o macOS, `./gradlew` con las mismas tareas. Los módulos se describen e
 
 - `:core:test`: contrato de acceso y tokens, solicitudes de pago y su cifrado, lectura del JSON de cuenta, tarjetas, saldos e historial, QR, servicios, importes, teléfonos con prefijo, y banco y moneda por el número de tarjeta.
 - `:scanner:testDebugUnitTest`: lectura de números, QR en imágenes generadas y seguimiento entre cuadros.
-- `:app:testDebugUnitTest`: transporte, sesión, API, pago de un solo envío, aprobación, la fachada `EnzonaRepository`, la fusión del historial y la conciliación de los pagos sin confirmar, la migración de `enzona.db` (Robolectric, desde el esquema exportado), la unión de la agenda con los contactos guardados y lo que muestran las pantallas.
+- `:app:testDebugUnitTest`: transporte, sesión, API, pago de un solo envío, aprobación, la fachada `EnzonaRepository`, la fusión del historial y la conciliación de los pagos sin confirmar, la migración de `enzona.db` (Robolectric, desde el esquema exportado), la unión de la agenda con los contactos guardados, lo que muestran las pantallas, la clave del PIN de pago en cada tipo de teléfono (con un Keystore en memoria que imita el rechazo del realme), el código de acceso con sus esperas y su décimo fallo, el pago con el PIN escrito sin ningún bloqueo y el sufijo de sincronización de la variante.
 
 Todas corren sin red: cada respuesta de ENZONA es sintética (un interceptor, `mockwebserver3` o una lambda), igual que los tokens. Ninguna prueba demuestra que el servidor acepte una operación.
 
@@ -60,6 +60,8 @@ El CI (`.github/workflows/android.yml`) ejecuta `:core:test :scanner:testDebugUn
 | `debug` | `dev.duardo.neotransfer.plus.debug` | Desarrollo con una cuenta ENZONA real. Se instala al lado de la versión publicada |
 | `preview` | `dev.duardo.neotransfer.plus.preview` | Como `debug`, más `PreviewActivity`: el catálogo de pantallas con datos inventados |
 | `release` | `dev.duardo.neotransfer.plus` | La que se publica: R8 con reducción de recursos |
+
+Cada variante sincroniza solo con la misma de NeoTransfer: el permiso `dev.duardo.neotransfer.permission.SYNC_CONTACTS` y la autoridad del otro proveedor (`dev.duardo.neotransfer.sync`) llevan el sufijo de la variante (`syncSuffix` en `app/build.gradle.kts`). Así `debug` y `preview` se instalan junto a la publicada aunque se firmen con otra clave.
 
 `PreviewActivity` abre una pantalla del catálogo; sin `screen`, lista todas:
 

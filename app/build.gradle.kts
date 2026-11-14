@@ -20,13 +20,17 @@ android {
         applicationId = "dev.duardo.neotransfer.plus"
         minSdk = 35
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += "arm64-v8a" }
+        syncSuffix("")
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     signingConfigs {
         if (localSigningFile.isFile) create("localRelease") {
             storeFile = file(requireNotNull(localSigning.getProperty("storeFile")))
@@ -38,6 +42,7 @@ android {
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
+            syncSuffix(".debug")
         }
         getByName("release") {
             isDebuggable = false
@@ -49,6 +54,7 @@ android {
         create("preview") {
             initWith(getByName("debug"))
             applicationIdSuffix = ".preview"
+            syncSuffix(".preview")
             matchingFallbacks += "debug"
         }
     }
@@ -67,6 +73,16 @@ android {
             }
         }
     }
+}
+
+/**
+ * The variant's suffix ("" in release) on the signature permission that guards contact and activity sync and on the
+ * peer's authority, so `debug` and `preview` install next to the release (signed with other keys) and sync only with
+ * the same variant of NeoTransfer. Release names stay as published.
+ */
+fun com.android.build.api.dsl.VariantDimension.syncSuffix(suffix: String) {
+    manifestPlaceholders["syncSuffix"] = suffix
+    buildConfigField("String", "SYNC_SUFFIX", "\"$suffix\"")
 }
 
 /** Writes res/xml/shortcuts.xml from its template: a static shortcut must name its package, which differs per variant. */

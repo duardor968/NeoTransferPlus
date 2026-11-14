@@ -2,6 +2,7 @@ package dev.duardo.neotransfer.plus.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.os.CancellationSignal
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
@@ -27,8 +28,10 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -38,43 +41,69 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaLoginWeb
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionFailure
+import dev.duardo.neotransfer.plus.designsystem.component.KeypadKey
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.platform.BiometricGate
+import dev.duardo.neotransfer.plus.platform.PinLock
 import dev.duardo.neotransfer.plus.platform.autostartSettings
 import dev.duardo.neotransfer.plus.platform.batteryExemptionRequest
 import dev.duardo.neotransfer.plus.platform.ignoresBatteryOptimizations
 import dev.duardo.neotransfer.plus.platform.openAutostartSettings
 import dev.duardo.neotransfer.plus.ui.common.AppName
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
 import dev.duardo.neotransfer.plus.ui.common.NeoTransferPlusTheme
 import dev.duardo.neotransfer.plus.ui.lock.BrandBackdrop
 import dev.duardo.neotransfer.plus.ui.lock.BrandBlock
+import dev.duardo.neotransfer.plus.ui.lock.CodeLockActions
+import dev.duardo.neotransfer.plus.ui.lock.CodeLockScreen
+import dev.duardo.neotransfer.plus.ui.lock.CodeSetupActions
+import dev.duardo.neotransfer.plus.ui.lock.CodeSetupScreen
+import dev.duardo.neotransfer.plus.ui.lock.CodeSheet
 import dev.duardo.neotransfer.plus.ui.lock.LockScreen
 import dev.duardo.neotransfer.plus.ui.login.LoginActions
 import dev.duardo.neotransfer.plus.ui.login.LoginScreen
+import dev.duardo.neotransfer.plus.ui.model.CodeLockUi
+import dev.duardo.neotransfer.plus.ui.model.CodeSetupUi
+import dev.duardo.neotransfer.plus.ui.model.ForgotUi
 import dev.duardo.neotransfer.plus.ui.model.LockUi
 import dev.duardo.neotransfer.plus.ui.model.LoginProblem
 import dev.duardo.neotransfer.plus.ui.model.LoginUi
+import dev.duardo.neotransfer.plus.ui.model.PinProtection
 import dev.duardo.neotransfer.plus.ui.payment.PasswordSheet
 import dev.duardo.neotransfer.plus.ui.settings.AutostartSheet
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 val LocalAuthorizer = staticCompositionLocalOf<Authorizer> { error("Authorizer missing") }
-val LocalGate = staticCompositionLocalOf<BiometricGate> { error("BiometricGate missing") }
 
 /** Whole app: theme, first-start permissions, then login, lock or the screens, and the one-line problems. */
 @Composable
 fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
     val appearance by plus.preferences.appearance.collectAsState()
-    val authorizer = remember(plus, gate) { Authorizer(plus, gate) }
+    val authorizer = remember(plus, gate) { Authorizer(plus.vault, plus.code, gate, plus.scope) }
     NeoTransferPlusTheme(appearance) {
-        CompositionLocalProvider(LocalAuthorizer provides authorizer, LocalGate provides gate) {
+        val pinLock by plus.vault.lock.collectAsState()
+        val unverified by plus.vault.unverified.collectAsState()
+        val protectsPin by plus.code.protectsPin.collectAsState()
+        // The phone's own locks may change while the app is away.
+        var resumes by remember { mutableIntStateOf(0) }
+        LifecycleResumeEffect(Unit) {
+            resumes++
+            onPauseOrDispose { }
+        }
+        val approval = remember(pinLock, unverified, protectsPin, resumes) { authorizer.approval() }
+        CompositionLocalProvider(LocalAuthorizer provides authorizer, LocalApproval provides approval) {
             FirstStartPermissions(plus)
             val session by plus.session.collectAsState()
             val locked by plus.locked.collectAsState()
+            val codeActive by plus.code.active.collectAsState()
             val snackbar = remember { SnackbarHostState() }
             LaunchedEffect(plus) {
                 plus.messages.collect { message ->
@@ -92,6 +121,7 @@ fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
                         Spacer(Modifier.weight(1.2f))
                     }
                     needsLogin -> LoginRoute(plus)
+                    locked && codeActive -> CodeLockRoute(plus, gate)
                     locked -> LockRoute(plus, gate)
                     else -> NavHost(plus)
                 }
@@ -108,6 +138,7 @@ fun PlusRoot(plus: PlusApp, gate: BiometricGate) {
                 }
             }
             authorizer.sheet?.let { PasswordSheet(it, authorizer) }
+            authorizer.codeSheet?.let { CodeSheet(it, authorizer.codeActions) }
         }
     }
 }
@@ -175,7 +206,86 @@ private fun LockRoute(plus: PlusApp, gate: BiometricGate) {
         show()
     }
     DisposableEffect(Unit) { onDispose { prompt?.cancel() } }
-    LockScreen(state, ::show)
+    // The unlock prompt always takes the screen lock too: the fingerprint icon only where a usable fingerprint key is.
+    val approval = if (plus.vault.lockFor(codeProtects = false) == PinLock.Fingerprint) PinProtection.Fingerprint else PinProtection.ScreenLock
+    CompositionLocalProvider(LocalApproval provides approval) { LockScreen(state, ::show) }
+}
+
+/**
+ * The lock while the access code is set: the code or, when the lock engages or the app returns, the fingerprint by
+ * itself if the code's fingerprint key still trusts the enrolled fingers. Never the phone's own PIN or pattern.
+ */
+@Composable
+private fun CodeLockRoute(plus: PlusApp, gate: BiometricGate) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val epoch by plus.lockEpoch.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var fingerprint by remember { mutableStateOf(false) }
+    var forgot by remember { mutableStateOf<ForgotUi?>(null) }
+    var prompt by remember { mutableStateOf<CancellationSignal?>(null) }
+    var newCode by remember { mutableStateOf<NewCode?>(null) }
+    val entry = remember { CodeEntry(plus.code, scope, Dispatchers.Default) { plus.unlock() } }
+    fun withFingerprint(onOpened: () -> Unit) {
+        if (prompt != null) return
+        val cipher = plus.code.fingerprintCipher() ?: return run { fingerprint = false }
+        prompt = gate.authenticate(
+            cipher, "Desbloquear $AppName", null, screenLock = false,
+            onSuccess = { authorized ->
+                prompt = null
+                if (plus.code.fingerprintOpens(authorized)) onOpened() else fingerprint = false
+            },
+            onCancelled = { prompt = null },
+            onError = { message -> prompt = null; plus.say(message) },
+        )
+    }
+    LaunchedEffect(epoch) {
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        fingerprint = plus.code.fingerprintCipher() != null
+        // Not during a wait after wrong codes: the fingerprint is off then, as the keypad.
+        if (fingerprint && newCode == null && forgot == null && plus.code.remaining() == 0L) withFingerprint { plus.unlock() }
+    }
+    DisposableEffect(Unit) { onDispose { prompt?.cancel(); entry.close(); newCode?.close() } }
+    newCode?.let { code ->
+        BackHandler { code.close(); newCode = null }
+        CodeSetupScreen(CodeSetupUi(code.step, code.ui), object : CodeSetupActions {
+            override fun key(key: KeypadKey) = code.key(key) { typed ->
+                scope.launch {
+                    // What the forgotten code protected cannot be opened any more.
+                    val created = runCatching {
+                        withContext(Dispatchers.Default) {
+                            plus.code.create(typed) { if (plus.vault.lock.value == PinLock.Code) plus.vault.clear() }
+                        }
+                    }.isSuccess
+                    typed.fill('\u0000')
+                    newCode = null
+                    if (created) plus.unlock() else plus.say("No se pudo guardar el código")
+                }
+            }
+            override fun back() { code.close(); newCode = null }
+        })
+        return
+    }
+    val actions = object : CodeLockActions {
+        override fun key(key: KeypadKey) = entry.key(key)
+        override fun fingerprint() {
+            if (plus.code.remaining() == 0L) withFingerprint { plus.unlock() }
+        }
+        override fun forgot() {
+            forgot = ForgotUi(erasesPin = fingerprint && plus.vault.lock.value == PinLock.Code, confirming = !fingerprint)
+        }
+        override fun closeForgot() { forgot = null }
+        override fun forgotFingerprint() {
+            forgot = null
+            withFingerprint { newCode = NewCode() }
+        }
+        override fun erase() { forgot = forgot?.copy(confirming = true) }
+        override fun confirmErase() {
+            forgot = null
+            if (!context.getSystemService(ActivityManager::class.java).clearApplicationUserData()) plus.say("No se pudieron borrar los datos")
+        }
+    }
+    CodeLockScreen(CodeLockUi(entry.ui, fingerprint, forgot), actions)
 }
 
 // ---- Login --------------------------------------------------------------------------------------------------

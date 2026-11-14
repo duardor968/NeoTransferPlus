@@ -7,6 +7,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import androidx.core.net.toUri
+import dev.duardo.neotransfer.plus.BuildConfig
 import dev.duardo.neotransfer.plus.app.accountActivity
 import dev.duardo.neotransfer.plus.app.exportedActivity
 import dev.duardo.neotransfer.plus.app.toUi
@@ -62,10 +63,13 @@ class SyncProvider : ContentProvider() {
     internal companion object {
         const val CONTACTS = "contacts"
         const val ACTIVITY = "activity"
-        /** NeoTransfer's [SyncProvider] counterpart. */
-        const val PEER = "content://dev.duardo.neotransfer.sync"
+        /** NeoTransfer's [SyncProvider] counterpart, in the same variant as this app. */
+        val PEER = "content://${peerAuthority(BuildConfig.SYNC_SUFFIX)}"
     }
 }
+
+/** The authority of NeoTransfer's sync provider in the variant with [suffix] ("" in release, ".debug", ".preview"). */
+internal fun peerAuthority(suffix: String) = "dev.duardo.neotransfer$suffix.sync"
 
 /** NeoTransfer's contacts, read when this app opens. */
 internal object PeerContacts {

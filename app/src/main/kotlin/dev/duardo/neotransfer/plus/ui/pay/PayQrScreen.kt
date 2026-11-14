@@ -53,6 +53,8 @@ import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.common.SourceCardPicker
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.model.PayQrUi
 import dev.duardo.neotransfer.plus.ui.model.PayReviewUi
 import java.math.BigDecimal
@@ -179,7 +181,7 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
         NeoButton(
             if (amount != null && amount.signum() > 0) "Pagar ${formatMoney(amount, review.currency)}" else "Pagar",
             actions::pay,
-            icon = Ds.drawable.ic_fingerprint,
+            icon = LocalApproval.current.icon(),
             enabled = review.canPay,
             loading = review.paying,
         )

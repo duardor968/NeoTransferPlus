@@ -23,8 +23,8 @@ NeoTransfer+ es una app Android independiente para ENZONA. No está afiliada a X
 ## Qué hace
 
 - **Cartera.** Las tarjetas que tienes vinculadas en ENZONA, con su saldo y cuándo se leyó. ENZONA solo da los cuatro últimos dígitos: puedes completar el número para verlo y copiarlo.
-- **Transferir** a una tarjeta (escribe el número, escanéalo o elige un contacto) o a una cuenta ENZONA, leyendo su QR. Revisas el destino y el importe y confirmas con la huella.
-- **Pagar con QR** de comercios ENZONA: la app consulta el código, te muestra el comercio y el importe (o lo escribes tú, si el QR no lo trae) y pagas con la huella.
+- **Transferir** a una tarjeta (escribe el número, escanéalo o elige un contacto) o a una cuenta ENZONA, leyendo su QR. Revisas el destino y el importe y confirmas con la huella, o con el bloqueo de pantalla si el teléfono no tiene huella.
+- **Pagar con QR** de comercios ENZONA: la app consulta el código, te muestra el comercio y el importe (o lo escribes tú, si el QR no lo trae) y lo confirmas como una transferencia.
 - **Cobrar.** El QR de tu cuenta, que genera ENZONA, para mostrarlo o compartirlo; con «Pedir importe», el QR lleva ya la cantidad.
 - **Servicios:** facturas de electricidad y de teléfono fijo, y recargas de Nauta y Nauta Hogar, con la deuda pendiente a la vista. Lo que ENZONA confirma queda en Guardados, a un toque y con el nombre que le pongas; las cuentas Nauta también se recargan desde «Recargar», en Inicio.
 - **Actividad.** El historial de tu cuenta ENZONA, con búsqueda, entradas y salidas, y días anteriores bajo demanda; cada operación con su comprobante para compartir. Y los últimos movimientos que el banco informa de cada tarjeta.
@@ -45,7 +45,7 @@ Es una versión temprana que sigue el contrato de la app oficial y lo comprueba 
 - Android 15 o más nuevo, de 64 bits.
 - Una cuenta ENZONA. NeoTransfer+ no crea cuentas; las tarjetas se añaden en Ajustes › Tarjetas o en la app oficial.
 - Conexión a Internet en la red cubana, con datos móviles o wifi.
-- Una huella configurada en el teléfono para pagar.
+- Para guardar la contraseña de pago, una huella o un bloqueo de pantalla en el teléfono, o el código de acceso de la app. Sin ninguno, se escribe en cada pago.
 
 ## Instalación
 
@@ -62,15 +62,15 @@ Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus d
 2. Toca «Entrar con ENZONA» y escribe tu usuario y contraseña en la página de ENZONA.
 3. La app lee tu cuenta, tus tarjetas, sus saldos y la actividad de la última semana.
 4. Si quieres ver el número completo de una tarjeta, tócala y escríbelo.
-5. En el primer pago, escribe tu contraseña de pago de ENZONA (6 dígitos) y confírmala con la huella. Cuando ENZONA confirma ese pago, la app la guarda y cada pago siguiente solo pide la huella; si un pago no se confirma, la pide otra vez.
+5. En el primer pago, escribe tu contraseña de pago de ENZONA (6 dígitos) y confírmala con la huella (sin huella, con el bloqueo de pantalla). Cuando ENZONA confirma ese pago, la app la guarda y cada pago siguiente solo pide la huella o el bloqueo; si un pago no se confirma, la pide otra vez.
 
-Con el bloqueo de pantalla activado, la app se desbloquea con la huella o el PIN del teléfono al abrirla y al volver después de un minuto fuera.
+Con el bloqueo de pantalla activado, la app se desbloquea con la huella o el PIN del teléfono al abrirla y al volver después de un minuto fuera. En Ajustes › Código de acceso puedes ponerle un código propio de 6 dígitos, también en teléfonos sin bloqueo: entonces se abre con ese código o con la huella, nunca con el PIN del teléfono, y con «Usar también para el PIN de pago» el código sustituye a la huella al pagar (es menos seguro).
 
 ## Privacidad
 
 - Sin servidores propios, cuentas, analítica ni publicidad: la app solo habla con ENZONA (`api.enzona.net` e `identity.enzona.net`), siempre por HTTPS.
 - Tu contraseña de acceso la escribes en la página de ENZONA; la app guarda solo la sesión, cifrada con una clave del Android Keystore.
-- La contraseña de pago se guarda cifrada y solo se abre con tu huella; si registras una huella nueva, se borra y la app la pide otra vez. Viaja cifrada con la clave pública de ENZONA en cada pago.
+- La contraseña de pago se guarda cifrada y solo se abre con tu huella; si registras una huella nueva, se borra y la app la pide otra vez. En un teléfono sin huella la abre el bloqueo de pantalla, y con el código de acceso para el PIN de pago, el código: diez códigos incorrectos seguidos la borran. Viaja cifrada con la clave pública de ENZONA en cada pago.
 - Al entrar, como hace la app oficial, la app envía a ENZONA datos básicos del teléfono: modelo, fabricante, placa, versión y compilación de Android, tipo de red y dirección IP local. Nunca el IMEI ni el número de la SIM.
 - Tarjetas, saldos, actividad y contactos se guardan en el teléfono y no entran en las copias de seguridad de Google. La agenda se lee en el teléfono y no sale de él; la app solo guarda las tarjetas que le añades. Cerrar sesión borra la sesión, las tarjetas, los saldos, el historial descargado y la contraseña de pago; los contactos se conservan.
 - El escáner lee los códigos en el propio teléfono, con ML Kit empaquetado en la app. La app retira el componente con el que ML Kit envía informes de uso a Google, así que no salen.

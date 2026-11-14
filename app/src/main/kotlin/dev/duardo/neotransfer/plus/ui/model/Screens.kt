@@ -14,6 +14,39 @@ sealed interface LockUi {
     data object Cancelled : LockUi
 }
 
+/** Digits of the access code. */
+const val CODE_LENGTH = 6
+
+/**
+ * The access code as it is typed: [filled] of its six digits, [error] after a wrong or mismatched one, [message] what
+ * the last attempt means (wrong, wait, what the next failures erase). [waiting]: a wait after failures runs, and the
+ * keypad and the fingerprint are off.
+ */
+@Immutable
+data class CodeEntryUi(val filled: Int = 0, val error: Boolean = false, val message: String? = null, val waiting: Boolean = false)
+
+/** The lock while the access code is set. [fingerprint]: a fingerprint can open it too. [forgot]: its sheet, when open. */
+@Immutable
+data class CodeLockUi(val entry: CodeEntryUi, val fingerprint: Boolean, val forgot: ForgotUi? = null)
+
+/**
+ * «¿Olvidaste el código?», offered when the fingerprint key still trusts the fingers, so it can set a new code;
+ * [erasesPin] when doing so erases the payment PIN the forgotten code protects. [confirming]: the sheet's second step,
+ * erasing the app's data, where it opens without that fingerprint.
+ */
+@Immutable
+data class ForgotUi(val erasesPin: Boolean = false, val confirming: Boolean = false)
+
+/** Which code a screen asks for: the current one first, a new one, the new one again. */
+enum class CodeStep { Current, Create, Repeat }
+
+@Immutable
+data class CodeSetupUi(val step: CodeStep, val entry: CodeEntryUi)
+
+/** The access code asked in a sheet: to pay ([title] the payment, [subtitle] who gets it) or to change a setting. */
+@Immutable
+data class CodeSheetUi(val title: String, val subtitle: String?, val entry: CodeEntryUi)
+
 /** Why access to ENZONA needs attention, in the user's terms. */
 enum class LoginProblem { Rejected, ClientRejected, Denied, ServerError, Expired, Timeout, Offline, PageFailed, RestoreFailed, ClearFailed, SaveFailed }
 
@@ -264,12 +297,21 @@ data class ReceiveUi(
     val asking: String? = null,
 )
 
+/** What keeps the payment PIN on this phone: what opens it for each payment. [None]: it is typed every time. */
+enum class PinProtection { Fingerprint, ScreenLock, Code, None }
+
 /**
- * The fingerprint unlocks the saved payment password; this asks for it the first time, and again after a payment that
- * ENZONA answered without confirming ([notice]).
+ * The fingerprint, the screen lock or the access code ([protection]) unlocks the saved payment password; this asks for
+ * it the first time, and again after a payment that ENZONA answered without confirming ([notice]).
  */
 @Immutable
-data class PasswordSheetUi(val value: String, val action: String, val error: String? = null, val notice: String? = null)
+data class PasswordSheetUi(
+    val value: String,
+    val action: String,
+    val error: String? = null,
+    val notice: String? = null,
+    val protection: PinProtection = PinProtection.Fingerprint,
+)
 
 /** Outcome of one payment. [operation] carries what was sent; [canSaveContact] for a card that is nobody's yet. */
 @Immutable
@@ -306,6 +348,10 @@ data class SettingsUi(
     val removing: CardUi? = null,
     /** The last payment with the saved password was answered without being confirmed. */
     val passwordUnverified: Boolean = false,
+    /** What keeps the saved payment PIN. */
+    val passwordProtection: PinProtection = PinProtection.Fingerprint,
+    /** «Código de acceso» is set. */
+    val codeActive: Boolean = false,
 )
 
 /** One cell ENZONA asks when a card is added, by its name, and what is typed for it. */
@@ -354,6 +400,17 @@ sealed interface AddCardUi {
     data class NotAdded(val kind: NotAddedKind, val reason: String) : Sent
 }
 
+/** [protection]: what would keep a PIN saved now. */
 @Immutable
-data class PasswordSettingsUi(val saved: Boolean, val value: String, val error: String? = null, val confirmingRemoval: Boolean = false)
+data class PasswordSettingsUi(
+    val saved: Boolean,
+    val value: String,
+    val error: String? = null,
+    val confirmingRemoval: Boolean = false,
+    val protection: PinProtection = PinProtection.Fingerprint,
+)
+
+/** Ajustes › Código de acceso, while one is set. [fingerprint]: what the code would stand in for is a usable fingerprint. */
+@Immutable
+data class AccessCodeUi(val protectsPin: Boolean, val fingerprint: Boolean = true)
 

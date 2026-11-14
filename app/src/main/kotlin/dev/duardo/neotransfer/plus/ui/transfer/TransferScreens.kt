@@ -63,6 +63,8 @@ import dev.duardo.neotransfer.plus.ui.common.ForeignCardThumb
 import dev.duardo.neotransfer.plus.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.plus.ui.common.numberLine
 import dev.duardo.neotransfer.plus.ui.common.timeLabels
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.model.DuplicateUi
 import dev.duardo.neotransfer.plus.ui.model.ContactUi
 import dev.duardo.neotransfer.plus.ui.model.RecipientPickUi
@@ -303,7 +305,7 @@ fun TransferReviewScreen(state: TransferReviewUi, actions: ReviewActions, modifi
             confirm = "Transferir ${formatMoney(state.amount.amount, state.amount.currency)}",
             onConfirm = actions::confirm,
             modifier = Modifier.padding(padding),
-            confirmIcon = Ds.drawable.ic_fingerprint,
+            confirmIcon = LocalApproval.current.icon(),
             confirming = state.sending,
             // The lines below already name the card or account of a known recipient.
             lead = { RecipientHeader(recipient, avatar = 56.dp, detail = false) },

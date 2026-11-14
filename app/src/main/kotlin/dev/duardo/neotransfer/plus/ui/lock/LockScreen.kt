@@ -37,6 +37,8 @@ import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.common.AppName
 import dev.duardo.neotransfer.plus.ui.common.BrandMark
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.model.LockUi
 
 fun interface LockActions {
@@ -62,7 +64,7 @@ fun LockScreen(state: LockUi, actions: LockActions, modifier: Modifier = Modifie
             exit = fadeOut(),
         ) {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.xxl)) {
-                NeoButton("Desbloquear", actions::unlock, icon = Ds.drawable.ic_fingerprint)
+                NeoButton("Desbloquear", actions::unlock, icon = LocalApproval.current.icon())
             }
         }
     }

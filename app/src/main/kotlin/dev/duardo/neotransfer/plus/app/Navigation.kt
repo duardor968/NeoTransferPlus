@@ -17,6 +17,8 @@ sealed interface Dest {
     data class Operation(val key: String) : Dest
     data object Settings : Dest
     data object PasswordSettings : Dest
+    /** Ajustes › Código de acceso: the code is set here first. */
+    data object AccessCode : Dest
     /** A card added to the ENZONA account, from Ajustes › Tarjetas. */
     data object AddCard : Dest
     data object About : Dest

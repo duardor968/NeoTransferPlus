@@ -59,10 +59,13 @@ import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.common.BottomAction
 import dev.duardo.neotransfer.plus.ui.common.ConfirmedMark
 import dev.duardo.neotransfer.plus.ui.common.statusText
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.model.OperationKind
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
 import dev.duardo.neotransfer.plus.ui.model.PasswordSheetUi
 import dev.duardo.neotransfer.plus.ui.model.PaymentResultUi
+import dev.duardo.neotransfer.plus.ui.model.PinProtection
 
 // ---- Result -------------------------------------------------------------------------------------------------
 
@@ -130,7 +133,7 @@ fun PaymentResultScreen(state: PaymentResultUi, actions: ResultActions, modifier
             if (operation.status != OperationStatus.Sending) BottomAction {
                 when {
                     operation.status == OperationStatus.NotSent ->
-                        NeoButton("Enviar de nuevo", actions::retry, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_fingerprint)
+                        NeoButton("Enviar de nuevo", actions::retry, style = NeoButtonStyle.Tonal, icon = LocalApproval.current.icon())
                     operation.status == OperationStatus.Unconfirmed ->
                         NeoButton("Cambiar PIN de pago", actions::changePassword, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_key)
                     state.canSaveContact -> NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
@@ -181,8 +184,9 @@ interface PasswordSheetActions {
 }
 
 /**
- * The ENZONA payment password: the fingerprint keeps it on this phone once a payment with it is confirmed, and unlocks
- * it for the payments after. [PasswordSheetUi.notice] says why it is asked again. Secret: no screenshots while open.
+ * The ENZONA payment password: the fingerprint, the screen lock or the access code keeps it on this phone once a payment
+ * with it is confirmed, and unlocks it for the payments after; without any of them it is typed for every payment.
+ * [PasswordSheetUi.notice] says why it is asked again. Secret: no screenshots while open.
  */
 @Composable
 fun PasswordSheet(state: PasswordSheetUi, actions: PasswordSheetActions) {
@@ -191,7 +195,15 @@ fun PasswordSheet(state: PasswordSheetUi, actions: PasswordSheetActions) {
         Column(Modifier.padding(horizontal = NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
             state.notice?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Neo.colors.warning) }
             PasswordField(state.value, actions::value, "PIN", state.error)
-            NeoButton(state.action, actions::submit, icon = Ds.drawable.ic_fingerprint, enabled = isPaymentPassword(state.value))
+            NeoButton(
+                state.action, actions::submit, enabled = isPaymentPassword(state.value),
+                icon = when (state.protection) {
+                    PinProtection.Fingerprint -> Ds.drawable.ic_fingerprint
+                    PinProtection.ScreenLock -> Ds.drawable.ic_lock
+                    // The code was typed already; without a lock nothing else is asked.
+                    PinProtection.Code, PinProtection.None -> null
+                },
+            )
         }
     }
 }

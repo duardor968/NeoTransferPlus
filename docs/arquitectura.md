@@ -14,7 +14,7 @@ NeoTransfer+ habla por HTTPS con la API personal de ENZONA, con la sesión de la
 Paquetes de `app/src/main/kotlin/dev/duardo/neotransfer/plus/`:
 
 - `data/`: `EnzonaDataGraph` (un cliente HTTP, una sesión y una base de datos por proceso), `EnzonaRepository` (la fachada que usan las pantallas), `enzona/` (sesión, transporte, API y pagos), `enzona/db/` (Room) y `contacts/` (las tarjetas guardadas y `Directory`, ver [Contactos](#contactos)).
-- `app/`: `PlusApp`, el estado del proceso (sesión, bloqueo, lecturas, pagos, avisos y navegación); `Authorizer` (huella y contraseña de pago); `Presentation.kt` (de filas de ENZONA a modelos de pantalla) y `routes/`.
+- `app/`: `PlusApp`, el estado del proceso (sesión, bloqueo, lecturas, pagos, avisos y navegación); `Authorizer` (lo que abre el PIN de pago: huella, bloqueo de pantalla o código de acceso); `Presentation.kt` (de filas de ENZONA a modelos de pantalla) y `routes/`.
 - `platform/`: biometría, contraseña de pago, notificaciones, mosaico de Ajustes rápidos, rutas de entrada, la agenda del teléfono (`AndroidPhoneBook`) y la exención de batería.
 - `ui/`: pantallas sin estado, que reciben un modelo y unas acciones.
 
@@ -47,7 +47,7 @@ La variante `preview` añade `app/src/preview/`: un catálogo de pantallas con d
 `data/enzona/EnzonaPayments.kt`, para transferencias a tarjeta o a cuenta, pagos QR y facturas:
 
 1. **Preparar.** `EnzonaPaymentCoordinator.prepare` congela lo revisado en `intent_journal` con estado `PREPARED`, sin contraseña.
-2. **Aprobar.** `Authorizer` abre la contraseña de pago con la huella. `EnzonaPaymentApproval` ata esa aprobación a la pantalla revisada: salir de la app, bloquearla o cambiar de cuenta la invalida.
+2. **Aprobar.** `Authorizer` abre el PIN de pago con lo que lo guarda en el teléfono ([Seguridad](#seguridad)), o lo pide escrito. `EnzonaPaymentApproval` ata esa aprobación a la pantalla revisada: salir de la app, bloquearla o cambiar de cuenta la invalida.
 3. **Cifrar.** `EnzonaPaymentRequests` exige seis dígitos (el formato de ENZONA), cifra la contraseña y el número de tarjeta destino con la clave pública de ENZONA (`app/src/main/res/raw/enzona_public_key.pem`, RSA PKCS#1 v1.5) y borra la contraseña de memoria.
 4. **Enviar.** Un compare-and-set `PREPARED → SUBMITTING` en Room concede el único envío de ese intento, para siempre. La aprobación se comprueba justo antes y después.
 5. **Resultado.**
@@ -128,12 +128,29 @@ Ajustes › Tarjetas (`core/card/EnzonaCards.kt`, `ui/settings/AddCardScreen.kt`
 
 ## Seguridad
 
-- **Bloqueo**: huella o credencial del teléfono al abrir y al volver tras 1 minuto en segundo plano (`PlusApp.LockAfterMillis`). Sin bloqueo de pantalla, la app abre directamente. Bloquear la interfaz no cierra la sesión de ENZONA.
-- **Contraseña de pago** (`platform/PaymentPasswordVault.kt`): seis dígitos, AES-256-GCM bajo una clave del Keystore que exige biometría fuerte en cada uso y se invalida al registrar una huella nueva. La escrita se cifra al aprobar el pago y se guarda solo cuando ese pago llega a `CONFIRMED`. Si ENZONA responde a un pago sin confirmarlo, queda «Por comprobar» y el siguiente pago la pide otra vez, con el aviso de que ENZONA la bloquea tras 3 intentos fallidos. Se descifra para un solo pago y se borra de memoria al cifrarla para ENZONA.
-- **Capturas**: bloqueadas (`SecureWindow`) en la página de acceso, la hoja de contraseña, Ajustes › Contraseña de pago y el paso de coordenadas y PIN del alta de una tarjeta.
+- **Bloqueo**: al abrir y al volver tras 1 minuto en segundo plano (`PlusApp.LockAfterMillis`). Sin código de acceso, la huella o, sin huella, el bloqueo de pantalla del teléfono; sin ninguno, la app abre directamente. Con código de acceso, el código o la huella, nunca el PIN o el patrón del teléfono. Bloquear la interfaz no cierra la sesión de ENZONA.
+- **Código de acceso** (`platform/AccessCode.kt`, Ajustes › Código de acceso), opcional en cualquier teléfono:
+  - seis dígitos con el teclado de la app. No se guarda: PBKDF2-HMAC-SHA256 con sal aleatoria y las iteraciones que tardan unos 250 ms en el teléfono (como mínimo 100 000) deriva una clave que debe abrir un bloque conocido (etiqueta GCM), envuelto a su vez con una clave del Keystore sin autenticación, así que solo se puede probar en el teléfono;
+  - fallos seguidos, en el bloqueo y en cualquier hoja que pida el código: desde el quinto, espera de 30 s que se dobla en cada fallo (máximo 1 h). La espera se mide con el tiempo desde el arranque (`SystemClock.elapsedRealtime()` y `Settings.Global.BOOT_COUNT`), nunca con el reloj que la persona puede cambiar; tras reiniciar el teléfono vuelve a empezar entera, y nunca pasa de su duración. Cuenta y espera sobreviven a los reinicios de la app, el fallo se cuenta antes de comprobarlo, y el código correcto o la huella del bloqueo ponen la cuenta a cero. Durante la espera el teclado y la huella se apagan;
+  - la huella del bloqueo autoriza una clave por uso solo biométrica que se crea al poner el código y muere al registrar otra huella: entonces solo vale el código, y al escribirlo se crea otra. En los teléfonos que rechazan las claves biométricas (abajo), solo el código;
+  - «¿Olvidaste el código?»: con esa huella, un código nuevo (el PIN de pago que protegía el anterior se borra, y la hoja lo avisa); o borrar los datos de la app (`ActivityManager.clearApplicationUserData()`);
+  - «Usar también para el PIN de pago»: el PIN se cifra con la clave del código y se envuelve con la clave del Keystore sin autenticación; el código sustituye a la huella al pagar. Si el código protege el PIN lo dice el propio PIN guardado (su `lock`); el ajuste solo decide el siguiente, así que un cambio interrumpido nunca obliga a escribirlo otra vez. Desde el décimo fallo seguido se borra el PIN guardado (el octavo y el noveno avisan), también si la app se cerró a mitad del décimo. Activarlo o desactivarlo pide el código y vuelve a cifrar el PIN guardado con una sola confirmación del otro método; sin ningún bloqueo, desactivarlo borra el PIN, y si el PIN no se puede leer todo queda como estaba. Cambiar el código vuelve a cifrar el PIN con el nuevo, o se queda el anterior.
+- **PIN de pago** (`platform/PaymentPasswordVault.kt`): seis dígitos, AES-256-GCM bajo la clave de lo que lo protege (`PinLock`):
+  - con huella fuerte, una clave del Keystore que exige la huella en cada uso y se invalida al registrar una huella nueva; el aviso solo ofrece la huella;
+  - con bloqueo de pantalla y sin huella, una clave por uso que abren la huella o el bloqueo (`AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL`, `CryptoObject` en un aviso que admite `DEVICE_CREDENTIAL`, sin botón negativo). El PIN guardado así sigue con esa clave, y su aviso con el bloqueo, aunque después se registre una huella, hasta que se borre;
+  - algunos teléfonos (realme Note 60) rechazan la clave biométrica justo después de una huella válida (`UserNotAuthenticatedException` o `KeyStoreException.ERROR_USER_AUTHENTICATION_REQUIRED` en las causas). La primera vez, el teléfono pasa para siempre a la clave anterior (`vault_device`, que borrar el PIN conserva) y vuelve a pedir la confirmación al momento. Solo al guardar: un PIN guardado con la clave de huella prueba que en ese teléfono funciona;
+  - una clave que falta al descifrar cuenta como invalidada: el PIN se borra y se pide escrito, sin crear otra clave;
+  - con el código de acceso, como arriba;
+  - sin bloqueo de pantalla ni código, no se guarda: se escribe en cada pago, y Ajustes › PIN de pago lo dice.
+
+  Los botones que llevan a la confirmación (`LocalApproval`, `ui/common/Approval.kt`) muestran la huella solo cuando el aviso es solo de huella, y el candado cuando admite el bloqueo de pantalla o pide el código.
+
+  El escrito se cifra al aprobar el pago y se guarda solo cuando ese pago llega a `CONFIRMED`. Si ENZONA responde a un pago sin confirmarlo, queda «Por comprobar» y el siguiente pago lo pide otra vez, con el aviso de que ENZONA lo bloquea tras 3 intentos fallidos. Se descifra para un solo pago y se borra de memoria al cifrarlo para ENZONA.
+- **Capturas**: bloqueadas (`SecureWindow`) en la página de acceso, la hoja de contraseña, las del código de acceso, Ajustes › Contraseña de pago y el paso de coordenadas y PIN del alta de una tarjeta.
 - **Diagnóstico** (`data/enzona/EnzonaLog.kt`, `adb logcat -s NeoTransferPlus`): cada fallo de lectura o de pago y cada pérdida de sesión. Anota el tipo, la clase de la excepción, el código HTTP, la ruta con los identificadores como `*` y la duración. De una respuesta que la app no entiende, solo el campo rechazado; del `fault` de un pago, solo los nombres de sus campos. Nunca tokens, cabeceras, cuerpos, nombres, números de tarjeta ni importes.
 - **Notificaciones**: privadas, con una versión pública genérica («Transferencia recibida») para la pantalla de bloqueo.
 - **Permisos**: `INTERNET`, `ACCESS_NETWORK_STATE`, `USE_BIOMETRIC`, `CAMERA`, `READ_CONTACTS`, `POST_NOTIFICATIONS` y `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, más los que añade WorkManager.
+- **Sincronización con NeoTransfer** (`platform/SyncProvider.kt`): el permiso de firma `dev.duardo.neotransfer.permission.SYNC_CONTACTS` protege el proveedor de cada app y la otra lo lee en `dev.duardo.neotransfer.sync`. Ambos llevan el sufijo de la variante (`syncSuffix` en el manifiesto, `BuildConfig.SYNC_SUFFIX`: vacío en `release`, `.debug`, `.preview`), así que cada variante sincroniza con la misma de NeoTransfer y `debug` y `preview` se instalan junto a la publicada, firmada con otra clave (sin `INSTALL_FAILED_DUPLICATE_PERMISSION`). Los nombres de `release` son los publicados.
 
 ## Escáner
 

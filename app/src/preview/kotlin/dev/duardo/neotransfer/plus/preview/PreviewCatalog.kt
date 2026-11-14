@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -44,6 +45,10 @@ import dev.duardo.neotransfer.plus.ui.activity.ActivityScreen
 import dev.duardo.neotransfer.plus.app.MarkedNotDoneReason
 import dev.duardo.neotransfer.plus.app.NotDeliveredReason
 import dev.duardo.neotransfer.plus.app.NotInHistoryReason
+import dev.duardo.neotransfer.plus.app.NoLockToSave
+import dev.duardo.neotransfer.plus.designsystem.format.formatMoney
+import dev.duardo.neotransfer.plus.app.codeMessage
+import dev.duardo.neotransfer.plus.platform.AccessCode
 import dev.duardo.neotransfer.plus.app.PasswordInDoubt
 import dev.duardo.neotransfer.plus.ui.activity.OperationDetailScreen
 import dev.duardo.neotransfer.plus.ui.contacts.AllContactsScreen
@@ -52,12 +57,17 @@ import dev.duardo.neotransfer.plus.ui.contacts.ContactDetailScreen
 import dev.duardo.neotransfer.plus.ui.contacts.ContactEditScreen
 import dev.duardo.neotransfer.plus.ui.contacts.ContactsScreen
 import dev.duardo.neotransfer.plus.ui.home.HomeScreen
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.lock.CodeLockScreen
+import dev.duardo.neotransfer.plus.ui.lock.CodeSetupScreen
+import dev.duardo.neotransfer.plus.ui.lock.CodeSheet
 import dev.duardo.neotransfer.plus.ui.lock.LockScreen
 import dev.duardo.neotransfer.plus.ui.login.LoginScreen
 import dev.duardo.neotransfer.plus.ui.model.ActivityContent
 import dev.duardo.neotransfer.plus.ui.model.ActivityFilter
 import dev.duardo.neotransfer.plus.ui.model.ActivitySource
 import dev.duardo.neotransfer.plus.ui.model.ActivityUi
+import dev.duardo.neotransfer.plus.ui.model.AccessCodeUi
 import dev.duardo.neotransfer.plus.ui.model.AddCardUi
 import dev.duardo.neotransfer.plus.ui.model.AllContactsUi
 import dev.duardo.neotransfer.plus.ui.model.BalanceUi
@@ -74,6 +84,12 @@ import dev.duardo.neotransfer.plus.ui.model.DuplicateUi
 import dev.duardo.neotransfer.plus.ui.model.EditablePhoneUi
 import dev.duardo.neotransfer.plus.ui.model.ForeignCardUi
 import dev.duardo.neotransfer.plus.ui.model.HomeUi
+import dev.duardo.neotransfer.plus.ui.model.CodeEntryUi
+import dev.duardo.neotransfer.plus.ui.model.CodeLockUi
+import dev.duardo.neotransfer.plus.ui.model.CodeSetupUi
+import dev.duardo.neotransfer.plus.ui.model.CodeSheetUi
+import dev.duardo.neotransfer.plus.ui.model.CodeStep
+import dev.duardo.neotransfer.plus.ui.model.ForgotUi
 import dev.duardo.neotransfer.plus.ui.model.LockUi
 import dev.duardo.neotransfer.plus.ui.model.LoginProblem
 import dev.duardo.neotransfer.plus.ui.model.LoginUi
@@ -81,6 +97,7 @@ import dev.duardo.neotransfer.plus.ui.model.NotAddedKind
 import dev.duardo.neotransfer.plus.ui.model.OperationStatus
 import dev.duardo.neotransfer.plus.ui.model.PasswordSettingsUi
 import dev.duardo.neotransfer.plus.ui.model.PasswordSheetUi
+import dev.duardo.neotransfer.plus.ui.model.PinProtection
 import dev.duardo.neotransfer.plus.ui.model.PayQrUi
 import dev.duardo.neotransfer.plus.ui.model.PayReviewUi
 import dev.duardo.neotransfer.plus.ui.model.PaymentResultUi
@@ -106,6 +123,7 @@ import dev.duardo.neotransfer.plus.ui.receive.ReceiveScreen
 import dev.duardo.neotransfer.plus.ui.services.ServiceFormScreen
 import dev.duardo.neotransfer.plus.ui.services.ServicesScreen
 import dev.duardo.neotransfer.plus.ui.settings.AboutScreen
+import dev.duardo.neotransfer.plus.ui.settings.AccessCodeScreen
 import dev.duardo.neotransfer.plus.ui.settings.AddCardScreen
 import dev.duardo.neotransfer.plus.ui.settings.LicensesScreen
 import dev.duardo.neotransfer.plus.ui.settings.PasswordSettingsScreen
@@ -115,6 +133,7 @@ import dev.duardo.neotransfer.plus.ui.shell.Tab
 import dev.duardo.neotransfer.plus.ui.transfer.RecipientScreen
 import dev.duardo.neotransfer.plus.ui.transfer.TransferAmountScreen
 import dev.duardo.neotransfer.plus.ui.transfer.TransferReviewScreen
+import java.math.BigDecimal
 import dev.duardo.neotransfer.plus.ui.model.Appearance as Theme
 
 /** Every screen and state, by id. Ids are what `--es screen` takes and how captures are named. */
@@ -123,6 +142,33 @@ object PreviewCatalog {
         // Access ----------------------------------------------------------------------------------------------
         "lock" to { LockScreen(LockUi.Prompting, noop()) },
         "lock-cancelled" to { LockScreen(LockUi.Cancelled, noop()) },
+        "lock-cancelled-screen-lock" to { ScreenLock { LockScreen(LockUi.Cancelled, noop()) } },
+        "lock-code" to { CodeLockScreen(CodeLockUi(CodeEntryUi(filled = 2), fingerprint = true), noop()) },
+        "lock-code-only" to { CodeLockScreen(CodeLockUi(CodeEntryUi(), fingerprint = false), noop()) },
+        "lock-code-wrong" to { CodeLockScreen(CodeLockUi(CodeEntryUi(error = true, message = codeMessage(1, 0, wrong = true, erased = false, protectsPin = false)), fingerprint = true), noop()) },
+        "lock-code-wait" to {
+            CodeLockScreen(CodeLockUi(CodeEntryUi(message = codeMessage(5, 30_000, wrong = false, erased = false, protectsPin = false), waiting = true), fingerprint = true), noop())
+        },
+        "lock-code-warning" to {
+            CodeLockScreen(
+                CodeLockUi(
+                    CodeEntryUi(message = codeMessage(8, 240_000, wrong = true, erased = false, protectsPin = true), waiting = true),
+                    fingerprint = false,
+                ),
+                noop(),
+            )
+        },
+        "lock-code-erased" to {
+            CodeLockScreen(
+                CodeLockUi(CodeEntryUi(message = codeMessage(10, 960_000, wrong = true, erased = true, protectsPin = true), waiting = true), fingerprint = false),
+                noop(),
+            )
+        },
+        "lock-code-forgot" to { CodeLockScreen(CodeLockUi(CodeEntryUi(), fingerprint = true, forgot = ForgotUi()), noop()) },
+        "lock-code-forgot-pin" to {
+            CodeLockScreen(CodeLockUi(CodeEntryUi(), fingerprint = true, forgot = ForgotUi(erasesPin = true)), noop())
+        },
+        "lock-code-forgot-erase" to { CodeLockScreen(CodeLockUi(CodeEntryUi(), fingerprint = false, forgot = ForgotUi(confirming = true)), noop()) },
         "login" to { LoginScreen(LoginUi.Start(), noop(), {}) },
         "login-offline" to { LoginScreen(LoginUi.Start(LoginProblem.Offline), noop(), {}) },
         "login-timeout" to { LoginScreen(LoginUi.Start(LoginProblem.Timeout), noop(), {}) },
@@ -269,6 +315,7 @@ object PreviewCatalog {
             )
         },
         "service-saved" to { ServiceFormScreen(savedElectricity(), noop()) },
+        "service-saved-screen-lock" to { ScreenLock { ServiceFormScreen(savedElectricity(), noop()) } },
         "service-saved-edit" to { ServiceFormScreen(savedElectricity().copy(edit = SavedEditUi("Casa")), noop()) },
         "service-saved-remove" to { ServiceFormScreen(savedElectricity().copy(edit = SavedEditUi("Casa", removing = true)), noop()) },
         "service-electricity-new" to {
@@ -347,6 +394,7 @@ object PreviewCatalog {
             TransferAmountScreen(TransferAmountUi(PreviewData.accountRecipient, "750", "CUP", wallet, 2, false, true, fixed = true), noop())
         },
         "transfer-review" to { TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop()) },
+        "transfer-review-screen-lock" to { ScreenLock { TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop()) } },
         "transfer-review-new" to {
             TransferReviewScreen(TransferReviewUi(RecipientUi.Card(ForeignCardUi("t", "9204068800123459", "BANDEC", currency = "CUP")), cup("1250.00"), bandec), noop())
         },
@@ -360,6 +408,28 @@ object PreviewCatalog {
         "transfer-password" to {
             TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
             PasswordSheet(PasswordSheetUi("482915", "Guardar y transferir"), noop())
+        },
+        "transfer-password-screen-lock" to {
+            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
+            PasswordSheet(PasswordSheetUi("482915", "Guardar y transferir", protection = PinProtection.ScreenLock), noop())
+        },
+        "transfer-password-no-lock" to {
+            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
+            PasswordSheet(PasswordSheetUi("482915", "Transferir", protection = PinProtection.None), noop())
+        },
+        "transfer-code" to {
+            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
+            CodeSheet(CodeSheetUi("Transferir ${formatMoney(BigDecimal("300.00"), "CUP")}", "a ${PreviewData.juan.name}", CodeEntryUi(filled = 3)), noop())
+        },
+        "transfer-code-wrong" to {
+            TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
+            CodeSheet(
+                CodeSheetUi(
+                    "Transferir ${formatMoney(BigDecimal("300.00"), "CUP")}", "a ${PreviewData.juan.name}",
+                    CodeEntryUi(message = codeMessage(9, AccessCode.waitAfter(9), wrong = true, erased = false, protectsPin = true), waiting = true),
+                ),
+                noop(),
+            )
         },
         "transfer-password-again" to {
             TransferReviewScreen(TransferReviewUi(PreviewData.juanRecipient, cup("300.00"), bpa), noop())
@@ -384,6 +454,14 @@ object PreviewCatalog {
                 noop(),
             )
         },
+        "payment-not-sent-screen-lock" to {
+            ScreenLock {
+                PaymentResultScreen(
+                    PaymentResultUi(PreviewData.sendingToMaria.copy(status = OperationStatus.NotSent, reason = NotDeliveredReason)),
+                    noop(),
+                )
+            }
+        },
         "payment-unconfirmed" to { PaymentResultScreen(PaymentResultUi(PreviewData.unconfirmedToYunior), noop()) },
         "payment-unconfirmed-answered" to {
             PaymentResultScreen(
@@ -403,6 +481,14 @@ object PreviewCatalog {
                 PayQrUi.Review(PayReviewUi("Cafetería La Esquina", "480.00", false, "", "CUP", wallet, 0, canPay = true)),
                 noop(), { FakeCamera(locked = true) },
             )
+        },
+        "pay-review-screen-lock" to {
+            ScreenLock {
+                PayQrScreen(
+                    PayQrUi.Review(PayReviewUi("Cafetería La Esquina", "480.00", false, "", "CUP", wallet, 0, canPay = true)),
+                    noop(), { FakeCamera(locked = true) },
+                )
+            }
         },
         "pay-review-open-amount" to {
             PayQrScreen(
@@ -459,6 +545,29 @@ object PreviewCatalog {
         "settings-password" to { PasswordSettingsScreen(PasswordSettingsUi(saved = false, value = ""), noop()) },
         "settings-password-saved" to { PasswordSettingsScreen(PasswordSettingsUi(saved = true, value = "482915"), noop()) },
         "settings-password-doubt" to { SettingsScreen(settings().copy(passwordUnverified = true), noop()) },
+        "settings-password-screen-lock" to {
+            PasswordSettingsScreen(PasswordSettingsUi(saved = false, value = "482915", protection = PinProtection.ScreenLock), noop())
+        },
+        "settings-password-no-lock" to {
+            PasswordSettingsScreen(PasswordSettingsUi(saved = false, value = "482915", error = NoLockToSave, protection = PinProtection.None), noop())
+        },
+        "settings-password-code" to { SettingsScreen(settings().copy(passwordProtection = PinProtection.Code, codeActive = true), noop()) },
+        "settings-password-screen-lock-saved" to { SettingsScreen(settings().copy(passwordProtection = PinProtection.ScreenLock), noop()) },
+        "settings-code" to { AccessCodeScreen(AccessCodeUi(protectsPin = false), noop()) },
+        "settings-code-pin" to { AccessCodeScreen(AccessCodeUi(protectsPin = true), noop()) },
+        "settings-code-screen-lock" to { AccessCodeScreen(AccessCodeUi(protectsPin = false, fingerprint = false), noop()) },
+        "settings-code-pin-ask" to {
+            AccessCodeScreen(AccessCodeUi(protectsPin = false), noop())
+            CodeSheet(CodeSheetUi("Usar también para el PIN de pago", null, CodeEntryUi(filled = 4)), noop())
+        },
+        "settings-code-disable" to {
+            AccessCodeScreen(AccessCodeUi(protectsPin = true), noop())
+            CodeSheet(CodeSheetUi("¿Desactivar el código?", null, CodeEntryUi(filled = 1)), noop())
+        },
+        "code-create" to { CodeSetupScreen(CodeSetupUi(CodeStep.Create, CodeEntryUi()), noop()) },
+        "code-repeat" to { CodeSetupScreen(CodeSetupUi(CodeStep.Repeat, CodeEntryUi(filled = 3)), noop()) },
+        "code-mismatch" to { CodeSetupScreen(CodeSetupUi(CodeStep.Create, CodeEntryUi(error = true, message = "Los códigos no coinciden")), noop()) },
+        "code-current" to { CodeSetupScreen(CodeSetupUi(CodeStep.Current, CodeEntryUi(error = true, message = codeMessage(1, 0, wrong = true, erased = false, protectsPin = false))), noop()) },
         "settings-password-remove" to { PasswordSettingsScreen(PasswordSettingsUi(saved = true, value = "", confirmingRemoval = true), noop()) },
         "settings-about" to { AboutScreen("0.1.0", noop()) },
         "settings-licenses" to {
@@ -503,6 +612,12 @@ private fun cells(vararg typed: String) =
 
 private fun activity(content: ActivityContent) =
     ActivityUi(ActivitySource.Account, "", ActivityFilter.All, listOf(bpa, bandec, banmet), null, content, olderFrom = java.time.LocalDate.of(2026, 10, 7))
+
+/** A phone whose prompts also take the screen lock: no usable fingerprint key. */
+@Composable
+private fun ScreenLock(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalApproval provides PinProtection.ScreenLock, content = content)
+}
 
 @Composable
 private fun Tabbed(tab: Tab, content: @Composable () -> Unit) {

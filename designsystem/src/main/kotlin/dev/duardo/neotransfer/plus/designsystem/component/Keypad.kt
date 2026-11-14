@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.plus.designsystem.component
 
+import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -20,9 +21,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -50,40 +53,54 @@ sealed interface KeypadKey {
     data object Backspace : KeypadKey
 }
 
-/** On-screen keypad for amounts and PINs. Without [decimal] the bottom-left slot stays empty. */
+/**
+ * On-screen keypad for amounts and PINs. Without [decimal] the bottom-left slot holds [extra] (the fingerprint of a
+ * lock, say) or stays empty. Not [enabled] (a wait after wrong codes), every key is dimmed and does nothing.
+ */
 @Composable
-fun NeoKeypad(onKey: (KeypadKey) -> Unit, modifier: Modifier = Modifier, decimal: Boolean = true) {
+fun NeoKeypad(onKey: (KeypadKey) -> Unit, modifier: Modifier = Modifier, decimal: Boolean = true, extra: KeypadExtra? = null, enabled: Boolean = true) {
     val rows = listOf(listOf(1, 2, 3), listOf(4, 5, 6), listOf(7, 8, 9))
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.38f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                row.forEach { digit -> Key(Modifier.weight(1f), digit.toString()) { onKey(KeypadKey.Digit(digit)) } }
+                row.forEach { digit -> Key(Modifier.weight(1f), digit.toString(), enabled = enabled) { onKey(KeypadKey.Digit(digit)) } }
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (decimal) Key(Modifier.weight(1f), DecimalSeparator.toString(), "Separador decimal") { onKey(KeypadKey.Decimal) }
-            else Box(Modifier.weight(1f))
-            Key(Modifier.weight(1f), "0") { onKey(KeypadKey.Digit(0)) }
-            Box(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 60.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(role = Role.Button, onClick = { onKey(KeypadKey.Backspace) })
-                    .semantics { contentDescription = "Borrar" },
-                contentAlignment = Alignment.Center,
-            ) { Icon(painterResource(R.drawable.ic_backspace), null, tint = MaterialTheme.colorScheme.onSurface) }
+            when {
+                decimal -> Key(Modifier.weight(1f), DecimalSeparator.toString(), "Separador decimal", enabled) { onKey(KeypadKey.Decimal) }
+                extra != null -> IconKey(Modifier.weight(1f), extra.icon, extra.description, enabled, extra.onClick)
+                else -> Box(Modifier.weight(1f))
+            }
+            Key(Modifier.weight(1f), "0", enabled = enabled) { onKey(KeypadKey.Digit(0)) }
+            IconKey(Modifier.weight(1f), R.drawable.ic_backspace, "Borrar", enabled) { onKey(KeypadKey.Backspace) }
         }
     }
 }
 
+/** A key of its own in the keypad's free corner. */
+@Immutable
+data class KeypadExtra(@param:DrawableRes val icon: Int, val description: String, val onClick: () -> Unit)
+
 @Composable
-private fun Key(modifier: Modifier, label: String, description: String? = null, onClick: () -> Unit) {
+private fun IconKey(modifier: Modifier, @DrawableRes icon: Int, description: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier
             .heightIn(min = 60.dp)
             .clip(RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) { Icon(painterResource(icon), null, tint = MaterialTheme.colorScheme.onSurface) }
+}
+
+@Composable
+private fun Key(modifier: Modifier, label: String, description: String? = null, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier
+            .heightIn(min = 60.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         contentAlignment = Alignment.Center,
     ) {

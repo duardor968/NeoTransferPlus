@@ -68,6 +68,8 @@ import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.plus.ui.common.BottomAction
 import dev.duardo.neotransfer.plus.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.plus.ui.common.icon
+import dev.duardo.neotransfer.plus.ui.common.LocalApproval
+import dev.duardo.neotransfer.plus.ui.common.icon
 import dev.duardo.neotransfer.plus.ui.model.BillUi
 import dev.duardo.neotransfer.plus.ui.model.Money
 import dev.duardo.neotransfer.plus.ui.model.SavedEditUi
@@ -230,7 +232,7 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
             BottomAction {
                 if (answered) {
                     val due = payLabel(state)
-                    NeoButton(due, actions::pay, icon = Ds.drawable.ic_fingerprint, enabled = state.canPay, loading = state.paying)
+                    NeoButton(due, actions::pay, icon = LocalApproval.current.icon(), enabled = state.canPay, loading = state.paying)
                 } else {
                     NeoButton("Consultar", actions::lookup, enabled = state.reference.isNotBlank() && lookup != ServiceLookupUi.Loading, loading = lookup == ServiceLookupUi.Loading)
                 }

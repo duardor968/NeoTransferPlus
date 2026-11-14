@@ -33,6 +33,7 @@ import dev.duardo.neotransfer.plus.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.plus.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.plus.designsystem.component.NeoRow
 import dev.duardo.neotransfer.plus.designsystem.component.NeoSegmented
+import dev.duardo.neotransfer.plus.designsystem.component.NeoSwitch
 import dev.duardo.neotransfer.plus.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.plus.designsystem.component.SecureWindow
 import dev.duardo.neotransfer.plus.designsystem.component.SectionHeader
@@ -46,9 +47,11 @@ import dev.duardo.neotransfer.plus.ui.common.BottomAction
 import dev.duardo.neotransfer.plus.ui.common.BrandMark
 import dev.duardo.neotransfer.plus.ui.common.CardThumb
 import dev.duardo.neotransfer.plus.ui.common.numberLine
+import dev.duardo.neotransfer.plus.ui.model.AccessCodeUi
 import dev.duardo.neotransfer.plus.ui.model.AccountCardUi
 import dev.duardo.neotransfer.plus.ui.model.Appearance
 import dev.duardo.neotransfer.plus.ui.model.PasswordSettingsUi
+import dev.duardo.neotransfer.plus.ui.model.PinProtection
 import dev.duardo.neotransfer.plus.ui.model.SettingsUi
 import dev.duardo.neotransfer.plus.ui.model.issuerOf
 import dev.duardo.neotransfer.plus.ui.payment.PasswordField
@@ -83,6 +86,7 @@ interface SettingsActions {
     fun confirmSignOut()
     fun cancelSignOut()
     fun password()
+    fun accessCode()
     fun appearance(value: Appearance)
     fun notifications()
     /** Battery exemption first; then, with the phone's own autostart list, the offer to open it. */
@@ -118,7 +122,11 @@ fun SettingsScreen(state: SettingsUi, actions: SettingsActions, modifier: Modifi
                 supporting = when {
                     !state.passwordSaved -> "Sin guardar"
                     state.passwordUnverified -> "Por comprobar"
-                    else -> "Guardado con tu huella"
+                    else -> when (state.passwordProtection) {
+                        PinProtection.ScreenLock -> "Guardado con el bloqueo de pantalla"
+                        PinProtection.Code -> "Guardado con el código de acceso"
+                        else -> "Guardado con tu huella"
+                    }
                 },
                 leading = { IconAvatar(Ds.drawable.ic_key) },
                 trailing = { Chevron() },
@@ -151,6 +159,14 @@ fun SettingsScreen(state: SettingsUi, actions: SettingsActions, modifier: Modifi
                 leading = { IconAvatar(Ds.drawable.ic_notifications) },
                 trailing = { Chevron() },
                 onClick = actions::notifications,
+            )
+            GroupDivider()
+            NeoRow(
+                "Código de acceso",
+                supporting = if (state.codeActive) "Activado" else "Desactivado",
+                leading = { IconAvatar(Ds.drawable.ic_lock) },
+                trailing = { Chevron() },
+                onClick = actions::accessCode,
             )
             GroupDivider()
             val actionable = !state.batteryExempt || state.autostart
@@ -250,7 +266,10 @@ interface PasswordSettingsActions {
     fun cancelRemove()
 }
 
-/** Saves or replaces the ENZONA payment password behind the fingerprint. Secret: no screenshots. */
+/**
+ * Saves or replaces the ENZONA payment password behind what protects it on this phone ([PasswordSettingsUi.protection]).
+ * Secret: no screenshots.
+ */
 @Composable
 fun PasswordSettingsScreen(state: PasswordSettingsUi, actions: PasswordSettingsActions, modifier: Modifier = Modifier) {
     SecureWindow()
@@ -258,7 +277,14 @@ fun PasswordSettingsScreen(state: PasswordSettingsUi, actions: PasswordSettingsA
         "PIN de pago", actions::back, modifier,
         bottom = {
             BottomAction {
-                NeoButton(if (state.saved) "Reemplazar con tu huella" else "Guardar con tu huella", actions::save, icon = Ds.drawable.ic_fingerprint, enabled = isPaymentPassword(state.value))
+                if (state.protection == PinProtection.Fingerprint) NeoButton(
+                    if (state.saved) "Reemplazar con tu huella" else "Guardar con tu huella", actions::save,
+                    icon = Ds.drawable.ic_fingerprint, enabled = isPaymentPassword(state.value),
+                )
+                else NeoButton(
+                    if (state.saved) "Reemplazar" else "Guardar", actions::save,
+                    icon = Ds.drawable.ic_lock.takeIf { state.protection != PinProtection.None }, enabled = isPaymentPassword(state.value),
+                )
             }
         },
     ) {
@@ -284,6 +310,45 @@ fun PasswordSettingsScreen(state: PasswordSettingsUi, actions: PasswordSettingsA
         onDismiss = actions::cancelRemove,
         destructive = true,
     )
+}
+
+// ---- Access code --------------------------------------------------------------------------------------------
+
+interface AccessCodeActions {
+    fun back()
+    /** Asks the current code, then the new one twice. */
+    fun change()
+    /** Asks the code, and the fingerprint or the screen lock once when a payment PIN is saved, to move it. */
+    fun protectPin(on: Boolean)
+    /** Asks the code in a sheet. */
+    fun disable()
+}
+
+/** Ajustes › Código de acceso, while one is set. */
+@Composable
+fun AccessCodeScreen(state: AccessCodeUi, actions: AccessCodeActions, modifier: Modifier = Modifier) {
+    SettingsScaffold("Código de acceso", actions::back, modifier) {
+        NeoGroup {
+            NeoRow("Cambiar código", leading = { IconAvatar(Ds.drawable.ic_lock_reset) }, trailing = { Chevron() }, onClick = actions::change)
+            GroupDivider()
+            NeoRow(
+                "Usar también para el PIN de pago",
+                supporting = if (state.fingerprint) "Menos seguro que la huella" else "Menos seguro que el bloqueo de pantalla",
+                leading = { IconAvatar(Ds.drawable.ic_key) },
+                trailing = { NeoSwitch(state.protectsPin, actions::protectPin) },
+                onClick = { actions.protectPin(!state.protectsPin) },
+                wrapTitle = true,
+            )
+        }
+        NeoGroup(Modifier.padding(top = NeoSpace.l)) {
+            NeoRow(
+                "Desactivar código",
+                leading = { IconAvatar(Ds.drawable.ic_lock, tint = Neo.colors.danger) },
+                titleColor = Neo.colors.danger,
+                onClick = actions::disable,
+            )
+        }
+    }
 }
 
 // ---- About --------------------------------------------------------------------------------------------------
