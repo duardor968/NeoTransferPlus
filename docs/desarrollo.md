@@ -41,6 +41,8 @@ Todas corren sin red: cada respuesta de ENZONA es sintética (un interceptor, `m
 .\gradlew.bat :app:testPreviewUnitTest --tests '*ScreenshotTest*' -Pscreens=home,transfer,activity
 ```
 
+`testPreviewUnitTest` incluye también todas las pruebas de `testDebugUnitTest`. Con `-Pcaptures=false`, como en el CI, no se escribe ninguna captura y `ScreenshotTest` se salta; el resultado puede venir entonces de la caché de compilación.
+
 Las imágenes del README (`docs/images/`) son `home`, `transfer-review` y `activity` en claro, reducidas a 1080 px de alto.
 
 ### En el teléfono
@@ -51,7 +53,7 @@ Las imágenes del README (`docs/images/`) son `home`, `transfer-review` y `activ
 
 Necesitan un teléfono con Android 15 o posterior conectado por ADB, o un emulador ARM de 64 bits: todas las variantes traen bibliotecas nativas solo para `arm64-v8a`. Prueban Room en memoria, la sesión cifrada con el Android Keystore y ML Kit con imágenes generadas. No hablan con ENZONA.
 
-El CI (`.github/workflows/android.yml`) ejecuta `:core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:testPreviewUnitTest :app:assembleDebug :app:lintDebug`.
+El CI (`.woodpecker/android.yaml`) ejecuta `:core:test :scanner:testDebugUnitTest :app:testPreviewUnitTest :app:assemblePreview :app:compileDebugAndroidTestKotlin :scanner:compileDebugAndroidTestKotlin :app:lintDebug` con `-Pcaptures=false` y la caché de compilación de Gradle. Compila las pruebas instrumentadas, pero no las ejecuta.
 
 ## Variantes
 

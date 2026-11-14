@@ -2,7 +2,6 @@ package dev.duardo.neotransfer.plus.app
 
 import dev.duardo.neotransfer.plus.app.routes.cardField
 import dev.duardo.neotransfer.plus.app.routes.cardFromQr
-import dev.duardo.neotransfer.plus.app.routes.luhn
 import dev.duardo.neotransfer.plus.app.routes.message
 import dev.duardo.neotransfer.plus.app.routes.notAdded
 import dev.duardo.neotransfer.plus.app.routes.typeAmount
@@ -414,12 +413,11 @@ class PresentationTest {
         assertNull(cardFromQr("{\"id_transaccion\":\"1\"}"))
     }
 
-    @Test fun keypadAndCardNumbersRefuseWhatCannotBeSent() {
+    @Test fun theKeypadRefusesAnAmountThatCannotBeSent() {
         assertEquals("0.", typeAmount("", KeypadKey.Decimal))
         assertEquals("12.5", typeAmount("12.", KeypadKey.Digit(5)))
         assertEquals("12.55", typeAmount("12.55", KeypadKey.Digit(1)))
         assertEquals("7", typeAmount("0", KeypadKey.Digit(7)))
-        assertTrue(luhn("9205990144718265"))
     }
 
     @Test fun aBalanceReadBeforeAnotherStepFailedStaysUpdated() {

@@ -10,7 +10,7 @@ steps:
   check:
     image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
     commands:
-      # Gradle (wrapper, dependencias, transforms) en la caché persistente del agente, una por repo.
+      # Gradle (wrapper, dependencias, transforms y la caché de compilación) en la caché persistente del agente, una por repo.
       - export GRADLE_USER_HOME="/ci-cache/gradle/$${CI_REPO_NAME}"
       # Dependencias por el proxy Maven de kvm8 (maven.asrlabs.space): Maven Central limita con 429 a la IP del CI.
       - mkdir -p "$${GRADLE_USER_HOME}/init.d"
@@ -43,7 +43,9 @@ steps:
         }
         GRADLE
       - mv -f "$${GRADLE_USER_HOME}/init.d/proxy-maven.gradle.$${CI_PIPELINE_NUMBER}" "$${GRADLE_USER_HOME}/init.d/proxy-maven.gradle"
-      - bash ./gradlew --no-daemon :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:testPreviewUnitTest :app:assembleDebug :app:lintDebug
+      # testPreviewUnitTest ya incluye las pruebas de testDebugUnitTest. Sin capturas: ScreenshotTest es para revisar en local.
+      # Las pruebas instrumentadas solo se compilan: lintDebug ya compila la variante debug.
+      - bash ./gradlew --no-daemon -Pcaptures=false :core:test :scanner:testDebugUnitTest :app:testPreviewUnitTest :app:assemblePreview :app:compileDebugAndroidTestKotlin :scanner:compileDebugAndroidTestKotlin :app:lintDebug
 
   reports:
     image: ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb

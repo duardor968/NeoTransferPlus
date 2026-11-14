@@ -12,6 +12,12 @@ plugins {
 val localSigningFile = File(System.getProperty("user.home"), ".neotransfer/signing.properties")
 val localSigning = Properties().apply { if (localSigningFile.isFile) localSigningFile.inputStream().use(::load) }
 
+/**
+ * Unit tests write Roborazzi captures (`ScreenshotTest`) unless `-Pcaptures=false`, as in the CI:
+ * then no PNG is written, `ScreenshotTest` is skipped and the results can come from the build cache.
+ */
+val captures = providers.gradleProperty("captures").orNull != "false"
+
 android {
     namespace = "dev.duardo.neotransfer.plus"
     compileSdk = 36
@@ -67,7 +73,13 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
-                it.systemProperty("roborazzi.test.record", "true")
+                if (captures) {
+                    it.systemProperty("roborazzi.test.record", "true")
+                    // The PNGs are not outputs of the task: a result taken from the build cache would leave them unwritten.
+                    it.outputs.doNotCacheIf("Roborazzi captures are not task outputs") { true }
+                } else {
+                    it.filter.excludeTestsMatching("*.ScreenshotTest")
+                }
                 it.systemProperty("screens", providers.gradleProperty("screens").getOrElse(""))
                 it.maxHeapSize = "3g"
             }

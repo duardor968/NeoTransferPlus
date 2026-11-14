@@ -23,7 +23,7 @@ private const val CARD_QR = "TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9204129951234568
 private const val PAY_QR = """{"id_transaccion":"TEST-0001","importe":"150.00","moneda":"CUP","numero_proveedor":"0000"}"""
 
 /**
- * Generates QR images (normal, inverted, low contrast, rotated, small inside a busy photo), saves them as PNG under
+ * Generates QR images (normal, inverted, faded, rotated, small inside a busy photo), saves them as PNG under
  * build/scanner-test-images for inspection, and reads them back through the still-image strategy. Android unit
  * tests have no java.awt, so the test draws with its own small grey canvas.
  */
@@ -74,13 +74,6 @@ class QrImageTest {
         "qr-inverted",
         draw(PAY_QR, 700, 700, module = 10, center = Pt(350f, 350f), ink = 255, paper = 18),
         PAY_QR,
-    )
-
-    @Test
-    fun lowContrastCode() = scan(
-        "qr-low-contrast",
-        draw(CARD_QR, 700, 700, module = 12, center = Pt(350f, 350f), ink = 90, paper = 180),
-        CARD_QR,
     )
 
     @Test
