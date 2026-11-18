@@ -62,6 +62,7 @@ import dev.duardo.neotransfer.plus.ui.common.CardNumberTransformation
 import dev.duardo.neotransfer.plus.ui.common.ForeignCardThumb
 import dev.duardo.neotransfer.plus.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.plus.ui.common.numberLine
+import dev.duardo.neotransfer.plus.ui.common.withAlias
 import dev.duardo.neotransfer.plus.ui.common.timeLabels
 import dev.duardo.neotransfer.plus.ui.common.LocalApproval
 import dev.duardo.neotransfer.plus.ui.common.icon
@@ -300,7 +301,7 @@ fun TransferReviewScreen(state: TransferReviewUi, actions: ReviewActions, modifi
                     is RecipientUi.Card -> recipient.name?.let { SummaryLine("Tarjeta destino", formatCardNumber(recipient.card.number), recipient.card.issuer) }
                     is RecipientUi.Account -> recipient.name?.let { SummaryLine("Cuenta ENZONA", recipient.username) }
                 },
-                SummaryLine("Desde", state.source.numberLine, state.source.bank),
+                SummaryLine("Desde", state.source.numberLine, state.source.withAlias(state.source.bank)),
             ),
             confirm = "Transferir ${formatMoney(state.amount.amount, state.amount.currency)}",
             onConfirm = actions::confirm,

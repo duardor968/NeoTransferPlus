@@ -37,6 +37,8 @@ data class CardUi(
     val currency: String,
     val holder: String? = null,
     val expiry: String? = null,
+    val alias: String? = null,
+    val ownerSubject: String? = null,
 )
 
 @Immutable

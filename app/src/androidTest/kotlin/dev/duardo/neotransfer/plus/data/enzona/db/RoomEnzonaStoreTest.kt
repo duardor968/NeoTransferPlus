@@ -92,7 +92,8 @@ class RoomEnzonaStoreTest {
         assertTrue(store.observeTransactions(other).first().isEmpty())
     }
 
-    @Test fun cardLinksRequireAFullPan() = runBlocking {
+    @Test fun aSuppliedPanMustBeComplete() = runBlocking {
+        store.cache(owner, EnzonaReadKind.CARDS, CARDS_RESOURCE, """{"card":[{"funding_source_uuid":"card","last4":"0007"}]}""", 100)
         store.putCardLink(EnzonaCardLink(owner, "card", "9200000000000007", "Nómina"))
         assertEquals("Nómina", store.observeCardLinks(owner).first().single().alias)
         assertFailsWith<IllegalArgumentException> { store.putCardLink(EnzonaCardLink(owner, "card", "0007")) }

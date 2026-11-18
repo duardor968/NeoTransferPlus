@@ -5,7 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -106,12 +105,17 @@ class Payment(private val plus: PlusApp, private val authorizer: Authorizer) {
         private set
     private var prepared: Pair<EnzonaPaymentDraft, EnzonaIntent>? = null
 
-    fun pay(draft: EnzonaPaymentDraft, title: String, subtitle: String?, firstTimeAction: String, name: String?) {
+    fun pay(owner: String, draft: EnzonaPaymentDraft, title: String, subtitle: String?, firstTimeAction: String, name: String?) {
         if (busy) return
         busy = true
         plus.scope.launch {
-            val intent = prepared?.takeIf { it.first == draft }?.second ?: try {
-                plus.prepare(draft).also { prepared = draft to it }
+            if (plus.session.value.ownerSubject != owner) {
+                busy = false
+                plus.say("La cuenta de ENZONA ha cambiado")
+                return@launch
+            }
+            val intent = prepared?.takeIf { it.first == draft && it.second.ownerSubject == owner }?.second ?: try {
+                plus.prepare(draft, owner).also { prepared = draft to it }
             } catch (_: Exception) {
                 busy = false
                 plus.say("No se pudo preparar el pago.")
@@ -208,7 +212,6 @@ fun AmountRoute(plus: PlusApp, dest: Dest.Amount) {
     val loaded by plus.wallet.collectAsState()
     val selected by plus.selectedCard.collectAsState()
     var input by rememberSaveable { mutableStateOf(dest.amount?.stripTrailingZeros()?.toPlainString().orEmpty()) }
-    var source by rememberSaveable { mutableIntStateOf(selected) }
     val noCards = loaded?.isEmpty() == true
     LaunchedEffect(noCards) {
         if (noCards) {
@@ -217,17 +220,18 @@ fun AmountRoute(plus: PlusApp, dest: Dest.Amount) {
         }
     }
     if (wallet.isEmpty()) return
-    val index = source.coerceIn(0, wallet.lastIndex)
-    val card = wallet[index]
+    var source by rememberSaveable { mutableStateOf(wallet.firstOrNull { it.card.id == selected }?.card?.id ?: wallet.first().card.id) }
+    val index = sourceIndex(plus, wallet, source)
+    val card = wallet.getOrNull(index) ?: return
     val amount = Amounts.parse(input)
     val balance = (card.balance as? BalanceUi.Known)?.money?.amount
     val actions = object : AmountActions {
         override fun back() { plus.nav.back() }
         override fun key(key: KeypadKey) { input = typeAmount(input, key) }
-        override fun source(index: Int) { source = index }
+        override fun source(index: Int) { source = wallet[index].card.id }
         override fun next() {
             val value = amount ?: return
-            plus.nav.push(Dest.Review(dest.recipient, value, card.card.id, dest.description))
+            plus.nav.push(Dest.Review(dest.recipient, value, card.card.id, card.card.ownerSubject ?: return, dest.description))
         }
     }
     TransferAmountScreen(
@@ -248,7 +252,7 @@ fun ReviewRoute(plus: PlusApp, dest: Dest.Review) {
     val journal by plus.journal.collectAsState()
     val transactions by plus.transactions.collectAsState()
     var duplicate by remember { mutableStateOf<DuplicateUi?>(null) }
-    val card = wallet.firstOrNull { it.card.id == dest.cardId }?.card ?: return
+    val card = wallet.firstOrNull { it.card.id == dest.cardId && it.card.ownerSubject == dest.owner }?.card ?: return
     val money = Money(dest.amount, card.currency)
     val recipient = dest.recipient
     val actions = object : ReviewActions {
@@ -274,7 +278,7 @@ fun ReviewRoute(plus: PlusApp, dest: Dest.Review) {
                 is RecipientUi.Account -> EnzonaAccountTransferDraft(card.id, recipient.uuid, recipient.username, dest.amount, card.currency, dest.description)
             }
             payment.pay(
-                draft, "Transferir ${formatMoney(money.amount, money.currency)}", "a ${recipient.to}", "Guardar y transferir",
+                dest.owner, draft, "Transferir ${formatMoney(money.amount, money.currency)}", "a ${recipient.to}", "Guardar y transferir",
                 name = (recipient as? RecipientUi.Account)?.let { it.name ?: it.username },
             )
         }
@@ -345,7 +349,6 @@ fun PayRoute(plus: PlusApp, code: String?) {
     var problem by remember { mutableStateOf<String?>(null) }
     var amount by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableStateOf(wallet.getOrNull(selected)?.card?.id) }
 
     fun resolve(raw: String) {
         cardFromQr(raw)?.let { pan ->
@@ -387,7 +390,12 @@ fun PayRoute(plus: PlusApp, code: String?) {
     val qr = resolved
     // A code in a currency is paid from a card in that currency.
     val sources = qr?.currency?.let { currency -> wallet.filter { it.card.currency.equals(currency, ignoreCase = true) } } ?: wallet
-    val index = sources.indexOfFirst { it.card.id == source }.coerceAtLeast(0)
+    var source by rememberSaveable(qr?.code) { mutableStateOf<String?>(null) }
+    val preferred = sources.firstOrNull { it.card.id == selected } ?: sources.firstOrNull()
+    LaunchedEffect(qr?.code, preferred?.card?.id) {
+        if (source == null && qr != null) source = preferred?.card?.id
+    }
+    val index = sourceIndex(plus, sources, source ?: preferred?.card?.id)
     val card = sources.getOrNull(index)?.card
     val value = if (qr?.amount != null) qr.amount else Amounts.parse(amount)
     val state = when {
@@ -415,9 +423,10 @@ fun PayRoute(plus: PlusApp, code: String?) {
             val paid = value ?: return
             val from = card ?: return
             val merchant = qr ?: return
+            if (merchant.ownerSubject != from.ownerSubject) return
             val currency = merchant.currency ?: from.currency
             payment.pay(
-                EnzonaQrMerchantPaymentDraft(from.id, merchant.code, paid, currency, description.trim().ifEmpty { null }),
+                from.ownerSubject ?: return, EnzonaQrMerchantPaymentDraft(from.id, merchant.code, paid, currency, description.trim().ifEmpty { null }),
                 "Pagar ${formatMoney(paid, currency)}", merchant.name?.let { "a $it" }, "Guardar y pagar",
                 name = merchant.name,
             )

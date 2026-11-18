@@ -60,6 +60,7 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -117,7 +118,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 interface HomeActions {
     fun refresh()
-    fun selectCard(index: Int)
+    fun selectCard(id: String)
     fun refreshBalance(cardId: String)
     fun openCard(cardId: String)
     fun addCard()
@@ -136,6 +137,7 @@ interface HomeActions {
 }
 
 interface CardSheetActions {
+    fun editAlias()
     fun number(value: String)
     fun save()
     fun copy()
@@ -160,8 +162,8 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
     val pager = rememberPagerState(initialPage = state.selected.coerceIn(0, pages - 1)) { pages }
     val latest by rememberUpdatedState(state)
     LaunchedEffect(pager) {
-        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
-            if (page < latest.cards.size && page != latest.selected) actions.selectCard(page)
+        snapshotFlow { latest.cards.getOrNull(pager.settledPage)?.card?.id }.distinctUntilChanged().collect { id ->
+            if (id != null) actions.selectCard(id)
         }
     }
     val current = state.cards.getOrNull(pager.currentPage)
@@ -209,6 +211,8 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         BrandMark(36.dp)
+                        Spacer(Modifier.weight(1f))
+                        current?.card?.alias?.let { Text(it, Modifier.weight(4f), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         Spacer(Modifier.weight(1f))
                         NeoIconButton(Ds.drawable.ic_settings, "Ajustes", actions::settings)
                     }
@@ -448,6 +452,14 @@ private fun CardSheet(state: CardSheetUi, actions: CardSheetActions) {
                 NeoButton("Guardar número", actions::save, enabled = state.input.length == 16, loading = state.saving)
             }
             NeoGroup {
+                NeoRow(
+                    if (card.alias == null) "Añadir alias" else "Editar alias",
+                    supporting = card.alias,
+                    leading = { IconAvatar(Ds.drawable.ic_edit) },
+                    trailing = { Chevron() },
+                    onClick = actions::editAlias,
+                )
+                GroupDivider()
                 NeoRow(
                     "Movimientos de la tarjeta",
                     leading = { IconAvatar(Ds.drawable.ic_receipt_long) },

@@ -3,6 +3,7 @@ package dev.duardo.neotransfer.plus.data.enzona.db
 import androidx.room.withTransaction
 import dev.duardo.neotransfer.plus.core.payment.EnzonaIntentState
 import dev.duardo.neotransfer.plus.core.payment.EnzonaPaymentEvidence
+import dev.duardo.neotransfer.plus.core.read.EnzonaReadJson
 import dev.duardo.neotransfer.plus.core.read.EnzonaTransaction
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntent
 import dev.duardo.neotransfer.plus.data.enzona.EnzonaIntentType
@@ -30,7 +31,7 @@ internal interface EnzonaLocalStore : EnzonaPaymentJournal {
     fun observePendingNotices(owner: String): Flow<List<EnzonaTransactionRow>>
     suspend fun markNoticesDelivered(owner: String, ids: List<String>)
     fun observeCardLinks(owner: String): Flow<List<EnzonaCardLink>>
-    suspend fun putCardLink(link: EnzonaCardLink)
+    suspend fun putCardLink(link: EnzonaCardLink, updateAlias: Boolean = link.alias != null)
     /** Erases what is kept of one card the account no longer has: its full number, alias and balance. */
     suspend fun forgetCard(owner: String, cardUuid: String)
     fun observeJournal(owner: String): Flow<List<EnzonaJournalEntry>>
@@ -80,9 +81,13 @@ internal class RoomEnzonaStore(private val database: EnzonaDatabase) : EnzonaLoc
 
     override fun observeCardLinks(owner: String) = dao.observeCardLinks(checkOwner(owner))
 
-    override suspend fun putCardLink(link: EnzonaCardLink) {
-        validateCardLink(link)
-        database.withTransaction { dao.putCardLink(link) }
+    override suspend fun putCardLink(link: EnzonaCardLink, updateAlias: Boolean) {
+        database.withTransaction {
+            validateCardLink(link, dao.cache(link.ownerSubject, EnzonaReadKind.CARDS, CARDS_RESOURCE))
+            val merged = link.mergeWith(dao.cardLink(link.ownerSubject, link.cardUuid), updateAlias)
+            if (merged.pan == null && merged.alias == null) dao.deleteCardLink(link.ownerSubject, link.cardUuid)
+            else dao.putCardLink(merged)
+        }
     }
 
     override suspend fun forgetCard(owner: String, cardUuid: String) {
@@ -172,7 +177,14 @@ private fun checkOwner(owner: String): String = owner.also { require(it.isNotBla
 internal fun EnzonaJournalEntry.couldBeUndelivered(): Boolean =
     (state == EnzonaIntentState.SUBMITTING || state == EnzonaIntentState.UNKNOWN) && remoteId == null && (httpStatus ?: 0) == 0
 
-internal fun validateCardLink(link: EnzonaCardLink) {
+/** A number-only write keeps the nickname. An explicitly blank nickname clears it. */
+internal fun EnzonaCardLink.mergeWith(previous: EnzonaCardLink?, updateAlias: Boolean) =
+    copy(pan = pan ?: previous?.pan, alias = if (updateAlias) alias else previous?.alias)
+
+internal fun validateCardLink(link: EnzonaCardLink, cached: EnzonaCacheRow?) {
+    val cards = cached?.let { EnzonaReadJson.cards(it.json) }.orEmpty()
+    val card = requireNotNull(cards.singleOrNull { it.fundingSourceUuid == link.cardUuid })
+    require(link.pan == null || card.last4.isNullOrBlank() || link.pan.takeLast(4) == card.last4)
     require(link.ownerSubject.isNotBlank() && link.cardUuid.isNotBlank())
     require(link.pan == null || link.pan.length == 16 && link.pan.all { it in '0'..'9' }) { "A known full PAN is required" }
     require(link.alias == null || link.alias.isNotBlank())

@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.plus.app.routes
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -27,7 +28,24 @@ fun EnzonaFailure.message(): String = when (this) {
 fun rememberWallet(plus: PlusApp): List<WalletCardUi> {
     val wallet by plus.wallet.collectAsState()
     val refreshing by plus.refreshingCards.collectAsState()
-    return remember(wallet, refreshing) { walletUi(wallet.orEmpty(), refreshing) }
+    val session by plus.session.collectAsState()
+    return remember(wallet, refreshing, session.ownerSubject) {
+        walletUi(wallet.orEmpty().filter { it.ownerSubject == session.ownerSubject }, refreshing)
+    }
+}
+
+/** Keep the reviewed UUID when the wallet is refreshed. A removed source ends this review. */
+@Composable
+internal fun sourceIndex(plus: PlusApp, cards: List<WalletCardUi>, id: String?): Int {
+    val index = cards.indexOfFirst { it.card.id == id }
+    val missing = id != null && cards.isNotEmpty() && index < 0
+    LaunchedEffect(missing) {
+        if (missing) {
+            plus.say("La tarjeta elegida ya no está disponible")
+            plus.nav.back()
+        }
+    }
+    return if (id == null && cards.isNotEmpty()) 0 else index
 }
 
 /** Keypad text: at most twelve whole digits and two decimals, one separator, no leading zeros. */

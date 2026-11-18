@@ -99,6 +99,9 @@ internal interface EnzonaDao {
     @Query("SELECT * FROM card_links WHERE ownerSubject = :owner ORDER BY cardUuid")
     fun observeCardLinks(owner: String): Flow<List<EnzonaCardLink>>
 
+    @Query("SELECT * FROM card_links WHERE ownerSubject = :owner AND cardUuid = :uuid")
+    fun cardLink(owner: String, uuid: String): EnzonaCardLink?
+
     @Upsert fun putCardLink(link: EnzonaCardLink)
 
     @Query("SELECT * FROM intent_journal WHERE ownerSubject = :owner AND id = :id")

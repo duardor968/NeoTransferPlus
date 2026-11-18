@@ -37,6 +37,7 @@ import dev.duardo.neotransfer.plus.app.routes.cardField
 import dev.duardo.neotransfer.plus.designsystem.component.skeleton
 import dev.duardo.neotransfer.plus.preview.PreviewData.bandec
 import dev.duardo.neotransfer.plus.preview.PreviewData.banmet
+import dev.duardo.neotransfer.plus.app.routes.CardAliasSheet
 import dev.duardo.neotransfer.plus.preview.PreviewData.bpa
 import dev.duardo.neotransfer.plus.preview.PreviewData.cup
 import dev.duardo.neotransfer.plus.preview.PreviewData.newCard
@@ -178,6 +179,10 @@ object PreviewCatalog {
         // Home ------------------------------------------------------------------------------------------------
         "home" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, PreviewData.inProgress, PreviewData.recent), noop()) } },
         "home-peer" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, emptyList(), PreviewData.recentWithPeer), noop()) } },
+        "home-alias" to {
+            Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 1, emptyList(), PreviewData.recent), noop()) }
+            CardAliasSheet(bandec, false, null, {}, {})
+        },
         "home-bandec" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 1, emptyList(), PreviewData.recent), noop()) } },
         "home-banmet" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 2, emptyList(), PreviewData.recent), noop()) } },
         "home-refreshing" to {

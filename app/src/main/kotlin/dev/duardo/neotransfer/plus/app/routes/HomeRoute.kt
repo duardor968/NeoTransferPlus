@@ -24,6 +24,7 @@ import dev.duardo.neotransfer.plus.ui.home.CardSheetActions
 import dev.duardo.neotransfer.plus.ui.home.HomeActions
 import dev.duardo.neotransfer.plus.ui.home.HomeScreen
 import dev.duardo.neotransfer.plus.ui.model.ActivitySource
+import dev.duardo.neotransfer.plus.ui.model.CardUi
 import dev.duardo.neotransfer.plus.ui.model.CardSheetUi
 import dev.duardo.neotransfer.plus.ui.model.HomeUi
 import dev.duardo.neotransfer.plus.ui.model.RefreshState
@@ -64,6 +65,7 @@ fun HomeRoute(plus: PlusApp) {
     var recharging by rememberSaveable { mutableStateOf(false) }
 
     var sheetCard by rememberSaveable { mutableStateOf<String?>(null) }
+    var aliasCard by remember { mutableStateOf<CardUi?>(null) }
     var input by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
@@ -75,7 +77,7 @@ fun HomeRoute(plus: PlusApp) {
             private val noCards get() = plus.wallet.value?.isEmpty() == true
 
             override fun refresh() = plus.refresh()
-            override fun selectCard(index: Int) { plus.selectedCard.value = index }
+            override fun selectCard(id: String) { plus.selectedCard.value = id }
             override fun refreshBalance(cardId: String) = plus.refreshBalance(cardId)
             override fun openCard(cardId: String) {
                 sheetCard = cardId
@@ -123,16 +125,23 @@ fun HomeRoute(plus: PlusApp) {
         }
     }
     val sheetActions = object : CardSheetActions {
+        override fun editAlias() {
+            aliasCard = sheet?.card
+            sheetCard = null
+        }
         override fun number(value: String) {
             input = value.filter(Char::isDigit).take(16)
             error = null
         }
         override fun save() {
             val card = sheet?.card ?: return
+            if (saving) return
+            val number = input
             saving = true
             plus.scope.launch {
-                val failure = plus.repository.saveCardLink(card.id, input, null)
+                val failure = plus.repository.saveCardLink(card.id, number, null, card.ownerSubject)
                 saving = false
+                if (sheetCard != card.id) return@launch
                 when (failure) {
                     null -> sheetCard = null
                     EnzonaFailure.INVALID_INPUT -> error = card.last4?.let { "Este número no termina en $it" } ?: "Número no válido"
@@ -156,9 +165,10 @@ fun HomeRoute(plus: PlusApp) {
         override fun close() { sheetCard = null }
     }
 
+    aliasCard?.let { CardAliasEditor(plus, it) { aliasCard = null } }
     HomeScreen(
         HomeUi(
-            cards, selected.coerceIn(0, (cards.size - 1).coerceAtLeast(0)), pending, recent, refresh,
+            cards, cardUis.indexOfFirst { it.id == selected }.coerceAtLeast(0), pending, recent, refresh,
             recharge = if (recharging) saved.filter { it.kind == ServiceKind.Nauta || it.kind == ServiceKind.NautaHome } else null,
         ),
         actions,

@@ -30,6 +30,9 @@ import dev.duardo.neotransfer.plus.data.enzona.EnzonaSessionNetwork
 import dev.duardo.neotransfer.plus.data.enzona.TokenPersistence
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaCacheRow
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaCacheSanitizer
+import dev.duardo.neotransfer.plus.data.enzona.db.CARDS_RESOURCE
+import dev.duardo.neotransfer.plus.data.enzona.db.validateCardLink
+import dev.duardo.neotransfer.plus.data.enzona.db.mergeWith
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaCardLink
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaCreditNotice
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaHistoryMerge
@@ -132,7 +135,12 @@ class EnzonaRepositoryTest {
             }
         }
         override fun observeCardLinks(owner: String) = links.map { rows -> rows.values.filter { it.ownerSubject == owner } }
-        override suspend fun putCardLink(link: EnzonaCardLink) = links.update { it + ((link.ownerSubject to link.cardUuid) to link) }
+        override suspend fun putCardLink(link: EnzonaCardLink, updateAlias: Boolean) = links.update {
+            validateCardLink(link, cache.value[Triple(link.ownerSubject, EnzonaReadKind.CARDS, CARDS_RESOURCE)])
+            val key = link.ownerSubject to link.cardUuid
+            val merged = link.mergeWith(it[key], updateAlias)
+            if (merged.pan == null && merged.alias == null) it - key else it + (key to merged)
+        }
         override suspend fun forgetCard(owner: String, cardUuid: String) {
             links.update { it - (owner to cardUuid) }
             cache.update { it - Triple(owner, EnzonaReadKind.BALANCE, cardUuid) }
@@ -417,6 +425,36 @@ class EnzonaRepositoryTest {
             val wallet = h.repository.cards.first().single()
             assertEquals("9200000000000007", wallet.pan)
             assertEquals("Nómina", wallet.alias)
+        }
+    }
+
+    @Test fun nicknameAndNumberCanBeSavedSeparatelyForTheReviewedAccount() = runBlocking {
+        Harness().use { h ->
+            assertNull(h.repository.refresh())
+            val calls = h.enzona.requests.size
+            assertNull(h.repository.saveCardLink(card, null, " Nómina ", owner))
+            val partial = h.repository.cards.first().single()
+            assertNull(partial.pan)
+            assertEquals("0007", partial.card.last4)
+            assertEquals("Nómina", partial.alias)
+            assertEquals(owner, partial.ownerSubject)
+            assertNull(h.repository.saveCardLink(card, "9200000000000007", null, owner))
+            assertEquals("Nómina", h.repository.cards.first().single().alias)
+            assertEquals(EnzonaFailure.INVALID_INPUT, h.repository.saveCardLink(card, "0007", "Ahorro", owner))
+            assertEquals(EnzonaFailure.SIGNED_OUT, h.repository.saveCardLink(card, null, "Ahorro", "other"))
+            assertNull(h.repository.saveCardLink(card, null, "Ahorro", owner))
+            val full = h.repository.cards.first().single()
+            assertEquals("9200000000000007", full.pan)
+            assertEquals("Ahorro", full.alias)
+            assertNull(h.repository.saveCardLink(card, null, " ", owner))
+            assertNull(h.repository.cards.first().single().alias)
+            assertEquals(full.pan, h.repository.cards.first().single().pan)
+            val draft = EnzonaCardTransferDraft(card, "9200000000000099", BigDecimal("300.00"), "CUP")
+            assertFailsWith<IllegalArgumentException> { h.repository.preparePayment(draft, "other") }
+            val reviewed = h.repository.preparePayment(draft, owner)
+            assertEquals(owner, reviewed.ownerSubject)
+            assertEquals(card, reviewed.cardUuid)
+            assertEquals(calls, h.enzona.requests.size)
         }
     }
 

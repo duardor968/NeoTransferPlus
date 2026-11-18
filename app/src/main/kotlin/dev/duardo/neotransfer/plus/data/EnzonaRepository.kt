@@ -46,7 +46,6 @@ import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaLocalStore
 import dev.duardo.neotransfer.plus.data.enzona.db.ACCOUNT_RESOURCE
 import dev.duardo.neotransfer.plus.data.enzona.db.CARDS_RESOURCE
 import dev.duardo.neotransfer.plus.data.enzona.db.EnzonaReadKind
-import dev.duardo.neotransfer.plus.data.enzona.db.validateCardLink
 import dev.duardo.neotransfer.plus.data.enzona.draft
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -104,6 +103,7 @@ data class EnzonaWalletCard(
     val alias: String?,
     val balance: EnzonaCardBalance?,
     val balanceObservedAt: Long?,
+    val ownerSubject: String? = null,
 ) {
     override fun toString(): String = "EnzonaWalletCard(redacted)"
 }
@@ -181,7 +181,7 @@ class EnzonaRepository internal constructor(
             cardRows.firstOrNull()?.let { row -> decoded { EnzonaReadJson.cards(row.json) } }.orEmpty().map { card ->
                 val balance = balances[card.fundingSourceUuid]
                 EnzonaWalletCard(card, linked[card.fundingSourceUuid]?.pan, linked[card.fundingSourceUuid]?.alias,
-                    balance?.let { decoded { EnzonaReadJson.balance(it.json) } }, balance?.observedAt)
+                    balance?.let { decoded { EnzonaReadJson.balance(it.json) } }, balance?.observedAt, owner)
             }
         }
     }
@@ -280,18 +280,15 @@ class EnzonaRepository internal constructor(
     }
 
     /** The full own-card number (ENZONA only returns last4) and an optional alias. */
-    suspend fun saveCardLink(cardUuid: String, pan: String?, alias: String?): EnzonaFailure? {
+    suspend fun saveCardLink(cardUuid: String, pan: String?, alias: String?, expectedOwner: String? = session.state.value.ownerSubject): EnzonaFailure? {
         val owner = session.state.value.ownerSubject ?: return EnzonaFailure.SIGNED_OUT
+        if (owner != expectedOwner) return EnzonaFailure.SIGNED_OUT
         val digits = pan?.filterNot(Char::isWhitespace)?.takeIf(String::isNotEmpty)
-        val cached = store.cached(owner, EnzonaReadKind.CARDS, CARDS_RESOURCE)
-            ?.let { row -> decoded { EnzonaReadJson.cards(row.json) } }?.singleOrNull { it.fundingSourceUuid == cardUuid }
-            ?: return EnzonaFailure.INVALID_INPUT
-        if (digits != null && (digits.length != 16 || !digits.all { it in '0'..'9' } ||
-                (!cached.last4.isNullOrBlank() && digits.takeLast(4) != cached.last4))) return EnzonaFailure.INVALID_INPUT
         val link = EnzonaCardLink(owner, cardUuid, digits, alias?.trim()?.takeIf(String::isNotEmpty))
-        return try { validateCardLink(link); store.putCardLink(link); null }
+        return try { store.putCardLink(link, updateAlias = alias != null); null }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: IllegalArgumentException) { EnzonaFailure.INVALID_INPUT }
+        catch (_: Exception) { EnzonaFailure.LOCAL }
     }
 
     suspend fun markCreditNoticesDelivered(transactionUuids: List<String>) {
@@ -383,8 +380,9 @@ class EnzonaRepository internal constructor(
     // Money ----------------------------------------------------------------------------------------
 
     /** Freezes the reviewed values in the journal. Throws EnzonaPaymentPreparationException or IllegalArgumentException. */
-    suspend fun preparePayment(draft: EnzonaPaymentDraft): EnzonaIntent {
+    suspend fun preparePayment(draft: EnzonaPaymentDraft, expectedOwner: String? = session.state.value.ownerSubject): EnzonaIntent {
         val owner = session.state.value.ownerSubject ?: throw EnzonaSessionUnavailableException(EnzonaSessionFailure.SIGN_IN_AGAIN)
+        require(owner == expectedOwner)
         return payments.prepare(owner, draft)
     }
 
@@ -412,7 +410,7 @@ class EnzonaRepository internal constructor(
     suspend fun prepareAgain(intent: EnzonaIntent): EnzonaIntent {
         val stored = store.intent(intent.ownerSubject, intent.id)
         require(stored?.intent == intent && stored.state == EnzonaIntentState.NOT_DELIVERED) { "Solo un pago que no llegó a ENZONA" }
-        return preparePayment(intent.draft())
+        return preparePayment(intent.draft(), intent.ownerSubject)
     }
 
     private suspend fun recheck(intent: EnzonaIntent) {

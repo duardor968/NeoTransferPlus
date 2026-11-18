@@ -22,7 +22,7 @@ NeoTransfer+ es una app Android independiente para ENZONA. No está afiliada a X
 
 ## Qué hace
 
-- **Cartera.** Las tarjetas que tienes vinculadas en ENZONA, con su saldo y cuándo se leyó. ENZONA solo da los cuatro últimos dígitos: puedes completar el número para verlo y copiarlo.
+- **Cartera.** Las tarjetas que tienes vinculadas en ENZONA, con su saldo y cuándo se leyó. Puedes nombrar cada tarjeta, por ejemplo «Nómina» o «Ahorro», aunque solo conozcas sus cuatro últimos dígitos. Si completas el número, puedes verlo al revisar una transferencia y copiarlo desde la cartera.
 - **Transferir** a una tarjeta (escribe el número, escanéalo o elige un contacto) o a una cuenta ENZONA, leyendo su QR. Revisas el destino y el importe y confirmas con la huella, o con el bloqueo de pantalla si el teléfono no tiene huella.
 - **Pagar con QR** de comercios ENZONA: la app consulta el código, te muestra el comercio y el importe (o lo escribes tú, si el QR no lo trae) y lo confirmas como una transferencia.
 - **Cobrar.** El QR de tu cuenta, que genera ENZONA, para mostrarlo o compartirlo; con «Pedir importe», el QR lleva ya la cantidad.

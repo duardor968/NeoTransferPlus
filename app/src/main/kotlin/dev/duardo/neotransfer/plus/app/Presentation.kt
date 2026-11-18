@@ -108,6 +108,8 @@ fun EnzonaWalletCard.toUi(): CardUi {
         currency = card.currency ?: balance?.currency ?: "CUP",
         holder = card.cardholder,
         expiry = expiryText(card.expiryDate),
+        alias = alias,
+        ownerSubject = ownerSubject,
     )
 }
 

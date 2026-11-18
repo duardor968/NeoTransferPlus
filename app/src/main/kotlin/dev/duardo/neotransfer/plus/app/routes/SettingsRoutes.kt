@@ -93,6 +93,7 @@ fun SettingsRoute(plus: PlusApp) {
     var confirming by remember { mutableStateOf(false) }
     var signingOut by remember { mutableStateOf(false) }
     val wallet by plus.wallet.collectAsState()
+    var aliasCard by remember { mutableStateOf<CardUi?>(null) }
     var cardMenu by remember { mutableStateOf<String?>(null) }
     var removing by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(emptySet<String>()) }
@@ -144,6 +145,10 @@ fun SettingsRoute(plus: PlusApp) {
         override fun addCard() = plus.nav.push(Dest.AddCard)
         override fun cardMenu(cardId: String) { cardMenu = cardId }
         override fun closeCardMenu() { cardMenu = null }
+        override fun editAlias(cardId: String) {
+            cardMenu = null
+            aliasCard = cards.firstOrNull { it.card.id == cardId }?.card
+        }
         override fun makeDefault(cardId: String) {
             cardMenu = null
             change(cardId) { plus.repository.setDefaultCard(cardId) }
@@ -159,6 +164,7 @@ fun SettingsRoute(plus: PlusApp) {
         }
         override fun cancelRemoveCard() { removing = null }
     }
+    aliasCard?.let { CardAliasEditor(plus, it) { aliasCard = null } }
     SettingsScreen(
         SettingsUi(
             account?.toUi(), saved, appearance, notifications, versionName(), confirmingSignOut = confirming, signingOut = signingOut,

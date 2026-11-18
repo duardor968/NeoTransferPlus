@@ -47,9 +47,9 @@ object PreviewData {
 
     fun cup(value: String) = Money(BigDecimal(value), "CUP")
 
-    val bpa = CardUi("c-bpa", "BPA", CardArt.BPA, "9212060123456781", "6781", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "03/29")
+    val bpa = CardUi("c-bpa", "BPA", CardArt.BPA, "9212060123456781", "6781", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "03/29", alias = "Nómina")
     /** ENZONA gave only the last four digits and the user has not completed it. */
-    val bandec = CardUi("c-bandec", "BANDEC", CardArt.BANDEC, null, "4325", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "11/30")
+    val bandec = CardUi("c-bandec", "BANDEC", CardArt.BANDEC, null, "4325", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "11/30", alias = "Ahorro")
     val banmet = CardUi("c-banmet", "Metropolitano", CardArt.BANMET, "9205950012348819", "8819", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "07/28")
 
     val wallet = listOf(

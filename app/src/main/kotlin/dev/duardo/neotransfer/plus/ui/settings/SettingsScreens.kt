@@ -38,7 +38,6 @@ import dev.duardo.neotransfer.plus.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.plus.designsystem.component.SecureWindow
 import dev.duardo.neotransfer.plus.designsystem.component.SectionHeader
 import dev.duardo.neotransfer.plus.designsystem.component.flushEnd
-import dev.duardo.neotransfer.plus.designsystem.format.NoBreak
 import dev.duardo.neotransfer.plus.designsystem.format.formatPhone
 import dev.duardo.neotransfer.plus.designsystem.theme.Neo
 import dev.duardo.neotransfer.plus.designsystem.theme.NeoSpace
@@ -47,6 +46,7 @@ import dev.duardo.neotransfer.plus.ui.common.BottomAction
 import dev.duardo.neotransfer.plus.ui.common.BrandMark
 import dev.duardo.neotransfer.plus.ui.common.CardThumb
 import dev.duardo.neotransfer.plus.ui.common.numberLine
+import dev.duardo.neotransfer.plus.ui.common.withAlias
 import dev.duardo.neotransfer.plus.ui.model.AccessCodeUi
 import dev.duardo.neotransfer.plus.ui.model.AccountCardUi
 import dev.duardo.neotransfer.plus.ui.model.Appearance
@@ -97,6 +97,7 @@ interface SettingsActions {
     fun addCard()
     fun cardMenu(cardId: String)
     fun closeCardMenu()
+    fun editAlias(cardId: String)
     fun makeDefault(cardId: String)
     /** Asks first ([SettingsUi.removing]). */
     fun removeCard(cardId: String)
@@ -190,7 +191,7 @@ fun SettingsScreen(state: SettingsUi, actions: SettingsActions, modifier: Modifi
     if (state.offeringAutostart) AutostartSheet(actions::openAutostart, actions::closeAutostart)
     state.removing?.let { card ->
         NeoConfirmSheet(
-            title = "¿Quitar ${listOfNotNull(card.bank, card.last4?.let { "••••$NoBreak$it" }).joinToString(NoBreak.toString())}?",
+            title = "¿Quitar ${card.withAlias(card.numberLine)}?",
             text = "Deja de estar en tu cuenta de ENZONA hasta que la añadas otra vez. Tu actividad se conserva.",
             confirm = "Quitar",
             dismiss = "Cancelar",
@@ -216,7 +217,7 @@ private fun AccountCardRow(account: AccountCardUi, menuOpen: Boolean, actions: S
     val card = account.card
     NeoRow(
         card.numberLine,
-        supporting = listOfNotNull(issuerOf(card.bank, card.currency), "Predeterminada".takeIf { account.primary }).joinToString(" · "),
+        supporting = card.withAlias(listOfNotNull(issuerOf(card.bank, card.currency), "Predeterminada".takeIf { account.primary }).joinToString(" · ")),
         leading = { CardThumb(card) },
         trailing = {
             // The spinner takes the ⋮'s own slot, so the row keeps its height; both line up with the › of the other rows.
@@ -226,6 +227,11 @@ private fun AccountCardRow(account: AccountCardUi, menuOpen: Boolean, actions: S
             else Box(Modifier.flushEnd()) {
                 NeoIconButton(Ds.drawable.ic_more_vert, "Opciones de la tarjeta", { actions.cardMenu(card.id) })
                 DropdownMenu(menuOpen, actions::closeCardMenu, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    DropdownMenuItem(
+                        { Text(if (card.alias == null) "Añadir alias" else "Editar alias") },
+                        { actions.editAlias(card.id) },
+                        leadingIcon = { Icon(painterResource(Ds.drawable.ic_edit), null) },
+                    )
                     if (!account.primary) DropdownMenuItem(
                         { Text("Predeterminada") },
                         { actions.makeDefault(card.id) },

@@ -221,7 +221,7 @@ class PlusApp(context: Context) {
     val refreshState: StateFlow<RefreshState> = mutableRefresh.asStateFlow()
     private val mutableRefreshingCards = MutableStateFlow(emptySet<String>())
     val refreshingCards: StateFlow<Set<String>> = mutableRefreshingCards.asStateFlow()
-    val selectedCard = MutableStateFlow(0)
+    val selectedCard = MutableStateFlow<String?>(null)
     val activity = MutableStateFlow(ActivityQuery())
 
     /** First day of account history not loaded yet; the regular read covers the last seven days. */
@@ -271,7 +271,7 @@ class PlusApp(context: Context) {
         mutableLocked.value = false
         nav.home()
         mutableOlderFrom.value = LocalDate.now(zone).minusDays(8)
-        selectedCard.value = 0
+        selectedCard.value = null
         activity.value = ActivityQuery()
         refresh()
     }
@@ -309,7 +309,7 @@ class PlusApp(context: Context) {
     /** Names shown for payments of this session that the journal does not keep (merchant, account holder). */
     val titles = MutableStateFlow(emptyMap<String, String>())
 
-    suspend fun prepare(draft: EnzonaPaymentDraft): EnzonaIntent = repository.preparePayment(draft)
+    suspend fun prepare(draft: EnzonaPaymentDraft, owner: String): EnzonaIntent = repository.preparePayment(draft, owner)
 
     /** A new intent with the values of one that never reached ENZONA; it is sent with its own approval. */
     suspend fun prepareAgain(intent: EnzonaIntent): EnzonaIntent =
@@ -323,7 +323,7 @@ class PlusApp(context: Context) {
     fun submit(intent: EnzonaIntent, password: CharArray, sealed: PaymentPasswordVault.Sealed?) {
         mutableNotSent.update { it - intent.id }
         val owner = session.value.ownerSubject
-        if (owner == null) {
+        if (owner == null || owner != intent.ownerSubject) {
             password.fill('\u0000')
             mutableNotSent.update { it + (intent.id to "La sesión de ENZONA terminó antes del envío.") }
             return

@@ -103,10 +103,13 @@ val CardUi.printedNumber: String
 val CardUi.numberLine: String
     get() = number?.let(::formatCardNumber) ?: last4?.let { "•••• $it" } ?: bank
 
+/** Local identity for selectors and reviews. The number remains a separate, copyable value. */
+fun CardUi.withAlias(detail: String?): String? = listOfNotNull(alias, detail).joinToString(" · ").ifEmpty { null }
+
 /** The user's card, 1:1 with the plastic when its art exists; otherwise a neutral face with the bank's name. */
 @Composable
 fun BankCard(card: CardUi, modifier: Modifier = Modifier, elevation: Dp = 10.dp, onClick: (() -> Unit)? = null) {
-    val description = "Tarjeta ${card.bank} ${card.numberLine}, ${card.currency.uppercase()}"
+    val description = card.withAlias("Tarjeta ${card.bank} ${card.numberLine}, ${card.currency.uppercase()}").orEmpty()
     val art = card.art.drawable
     if (art != null) {
         CardFace(

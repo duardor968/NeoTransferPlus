@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -37,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.plus.designsystem.R as Ds
 import dev.duardo.neotransfer.plus.designsystem.component.EmptyState
@@ -173,12 +175,18 @@ private fun CardFilter(state: ActivityUi, actions: ActivityActions, modifier: Mo
             horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
         ) {
             CardThumb(selected, width = 34.dp)
+            selected.alias?.let { Text(it, Modifier.widthIn(max = 100.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Icon(painterResource(Ds.drawable.ic_expand_more), null, Modifier.size(20.dp))
         }
         DropdownMenu(open, { open = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
             state.cards.forEach { card ->
                 DropdownMenuItem(
-                    { Text(card.numberLine) },
+                    {
+                        Column {
+                            Text(card.numberLine)
+                            card.alias?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    },
                     { open = false; actions.card(card.id) },
                     leadingIcon = { CardThumb(card, width = 34.dp) },
                 )

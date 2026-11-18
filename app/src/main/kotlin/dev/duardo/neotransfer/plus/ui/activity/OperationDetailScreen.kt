@@ -40,6 +40,7 @@ import dev.duardo.neotransfer.plus.ui.common.label
 import dev.duardo.neotransfer.plus.ui.common.moneyMoved
 import dev.duardo.neotransfer.plus.ui.common.namesPerson
 import dev.duardo.neotransfer.plus.ui.common.numberLine
+import dev.duardo.neotransfer.plus.ui.common.withAlias
 import dev.duardo.neotransfer.plus.ui.common.timeLabels
 import dev.duardo.neotransfer.plus.ui.common.tone
 import dev.duardo.neotransfer.plus.ui.model.CounterpartUi
@@ -144,7 +145,7 @@ fun detailLines(operation: OperationUi, labels: TimeLabels): List<SummaryLine> {
     }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
-        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it.numberLine, issuerOf(it.bank, it.currency)) },
+        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it.numberLine, it.withAlias(issuerOf(it.bank, it.currency))) },
         operation.description?.takeIf { it != operation.title }?.let { SummaryLine("Concepto", it) },
         operation.channel?.takeIf { operation.origin != OperationOrigin.NeoTransfer }?.let { SummaryLine("Canal", it) },
         SummaryLine("Hecha con", "NeoTransfer").takeIf { operation.origin == OperationOrigin.NeoTransfer },

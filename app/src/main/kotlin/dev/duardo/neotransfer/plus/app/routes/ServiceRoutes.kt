@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -82,7 +81,9 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
     var editing by rememberSaveable { mutableStateOf<String?>(null) }
     var removing by rememberSaveable { mutableStateOf(false) }
     var amount by rememberSaveable { mutableStateOf("") }
-    var source by rememberSaveable { mutableIntStateOf(selected) }
+    var source by rememberSaveable { mutableStateOf<String?>(null) }
+    val preferred = wallet.firstOrNull { it.card.id == selected } ?: wallet.firstOrNull()
+    LaunchedEffect(preferred?.card?.id) { if (source == null) source = preferred?.card?.id }
     var bill by rememberSaveable { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
@@ -119,7 +120,8 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
     }
     LaunchedEffect(Unit) { if (dest.reference.isNotEmpty() && answer == null) lookup() }
 
-    val index = source.coerceIn(0, (wallet.size - 1).coerceAtLeast(0))
+    val index = sourceIndex(plus, wallet, source ?: preferred?.card?.id)
+    if (wallet.isNotEmpty() && index < 0) return
     val card = wallet.getOrNull(index)?.card
     val currency = card?.currency ?: "CUP"
     val current = answer
@@ -182,11 +184,11 @@ fun ServiceRoute(plus: PlusApp, dest: Dest.Service) {
         override fun lookup() = lookup()
         override fun bill(id: String) { bill = id }
         override fun amount(value: String) { amount = value }
-        override fun source(index: Int) { source = index }
+        override fun source(index: Int) { source = wallet[index].card.id }
         override fun pay() {
             val ready = draft ?: return
             val verb = if (kind == ServiceKind.Nauta || kind == ServiceKind.NautaHome) "Recargar" else "Pagar"
-            payment.pay(ready, "$verb ${formatMoney(ready.amount, ready.currency)}", kind.label, "Guardar y pagar", name = null)
+            payment.pay(card?.ownerSubject ?: return, ready, "$verb ${formatMoney(ready.amount, ready.currency)}", kind.label, "Guardar y pagar", name = null)
         }
         override fun editSaved() {
             editing = savedReference?.name.orEmpty()

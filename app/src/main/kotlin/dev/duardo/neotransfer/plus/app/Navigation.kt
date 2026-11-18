@@ -35,7 +35,7 @@ sealed interface Dest {
     data class CardEdit(val contactId: String, val cardId: String? = null, val thenTransfer: Boolean = false) : Dest
     data object Recipient : Dest
     data class Amount(val recipient: RecipientUi, val amount: BigDecimal? = null, val fixed: Boolean = false, val description: String? = null) : Dest
-    data class Review(val recipient: RecipientUi, val amount: BigDecimal, val cardId: String, val description: String?) : Dest
+    data class Review(val recipient: RecipientUi, val amount: BigDecimal, val cardId: String, val owner: String, val description: String?) : Dest
     data class Result(val intentId: String) : Dest
     /** [code]: a QR already read by the universal scanner, resolved on arrival. */
     data class Pay(val code: String? = null) : Dest

@@ -212,7 +212,7 @@ fun receiptText(operation: OperationUi, labels: TimeLabels): String = buildStrin
     appendLine(operation.title)
     operation.amount?.let { appendLine(formatMoney(it.amount, it.currency)) }
     operation.statusText.takeIf(String::isNotEmpty)?.let(::appendLine)
-    detailLines(operation, labels).forEach { line ->
+    detailLines(operation.copy(card = operation.card?.copy(alias = null)), labels).forEach { line ->
         appendLine("${line.label}: ${line.value}" + (line.detail?.let { " ($it)" } ?: ""))
     }
 }.trimEnd()

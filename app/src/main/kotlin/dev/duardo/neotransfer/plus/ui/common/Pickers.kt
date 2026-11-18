@@ -55,7 +55,7 @@ fun CardPicker(
         Column(Modifier.fillMaxWidth().clip(shape).background(Neo.colors.group).border(1.dp, Neo.colors.divider, shape)) {
             NeoRow(
                 current.numberLine,
-                supporting = detail(selected),
+                supporting = current.withAlias(detail(selected)),
                 leading = { CardThumb(current, width = 52.dp) },
                 trailing = if (several) ({ Icon(painterResource(Ds.drawable.ic_expand_more), "Cambiar tarjeta", tint = MaterialTheme.colorScheme.onSurfaceVariant) }) else null,
                 onClick = if (several) ({ open = true }) else null,
@@ -67,7 +67,7 @@ fun CardPicker(
             cards.forEachIndexed { index, card ->
                 NeoRow(
                     card.numberLine,
-                    supporting = detail(index),
+                    supporting = card.withAlias(detail(index)),
                     leading = { CardThumb(card, width = 52.dp) },
                     trailing = if (index == selected) ({ Icon(painterResource(Ds.drawable.ic_check), "Seleccionada", tint = Neo.colors.accentInk) }) else null,
                     onClick = { open = false; onSelect(index) },
